@@ -1,0 +1,12 @@
+{
+  "name": "@agentos/marketplace-tools",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "echo \"@agentos/marketplace-tools: not implemented yet\"",
+    "typecheck": "echo \"@agentos/marketplace-tools: not implemented yet\"",
+    "lint": "echo \"@agentos/marketplace-tools: not implemented yet\"",
+    "test": "echo \"@agentos/marketplace-tools: not implemented yet\""
+  }
+}

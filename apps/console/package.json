@@ -1,0 +1,11 @@
+{
+  "name": "@agentos/console",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "build": "echo \"console: not implemented yet\"",
+    "typecheck": "echo \"console: not implemented yet\"",
+    "lint": "echo \"console: not implemented yet\"",
+    "test": "echo \"console: not implemented yet\""
+  }
+}

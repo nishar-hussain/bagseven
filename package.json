@@ -1,0 +1,32 @@
+{
+  "name": "agentos",
+  "version": "0.1.0",
+  "private": true,
+  "description": "AgentOS — infrastructure for autonomous AI agents: identity, treasury, policy, marketplaces, evolution",
+  "packageManager": "pnpm@10.33.0",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "db:up": "docker compose -f deploy/docker-compose.yml up -d",
+    "db:down": "docker compose -f deploy/docker-compose.yml down",
+    "db:migrate": "pnpm --filter @agentos/db run migrate",
+    "db:generate": "pnpm --filter @agentos/db run generate",
+    "db:studio": "pnpm --filter @agentos/db run studio"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^26.6.1",
+    "eslint": "^10.10.0",
+    "tsx": "^4.23.13",
+    "turbo": "^2.3.0",
+    "typescript": "^5.7.0",
+    "typescript-eslint": "^8.70.0",
+    "vitest": "^5.0.1"
+  }
+}

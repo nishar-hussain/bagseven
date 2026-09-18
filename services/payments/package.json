@@ -1,0 +1,12 @@
+{
+  "name": "@agentos/payments",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "echo \"@agentos/payments: not implemented yet\"",
+    "typecheck": "echo \"@agentos/payments: not implemented yet\"",
+    "lint": "echo \"@agentos/payments: not implemented yet\"",
+    "test": "echo \"@agentos/payments: not implemented yet\""
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "name": "@agentos/directory",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "echo \"@agentos/directory: not implemented yet\"",
+    "typecheck": "echo \"@agentos/directory: not implemented yet\"",
+    "lint": "echo \"@agentos/directory: not implemented yet\"",
+    "test": "echo \"@agentos/directory: not implemented yet\""
+  }
+}
