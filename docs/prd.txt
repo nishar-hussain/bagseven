@@ -1,0 +1,340 @@
+AgentOS — AI Agent Economy Platform
+Full End-to-End Product Requirements Document (PRD)
+Version: 1.0 · Status: Draft for build · Owner: You (Founder/Tech Lead) · Last updated: Sept 18, 2026
+
+0. How to use this document
+This PRD is written so you can build the platform in small, independently shippable slices. Each slice in Section 12 is scoped so that you can:
+
+Build it in isolation
+Deploy that slice alone to production
+Test it manually in production with real (small-value) transactions
+Only move to the next slice once it's stable
+Nothing in this PRD assumes you build all five subsystems at once. Sections 1–11 describe the end state — the full architecture, data model, and tech stack. Section 12 is the actual execution plan, broken into ~20 small pieces across 5 phases.
+
+1. Executive Summary
+AgentOS is infrastructure — not an app — for autonomous AI agents to operate in an economy: to have a verifiable identity, hold and spend money under hard-coded limits, discover and pay for tools and data, transact with other agents, and improve themselves over time, all while a human stays in ultimate control.
+
+It is the synthesis of five separate hackathon-stage concepts into one coherent platform, organized as five subsystems (not five merged codebases):
+
+#	Subsystem	Originating idea	Core question it answers
+1	Identity & Registry	Novi Corpus	Who is this agent, and who is accountable for it?
+2	Policy & Treasury	Cordon	What is this agent allowed to spend, and on what?
+3	Tool Marketplace	OnchainRouter	What actions/tools can this agent call?
+4	Data Marketplace	OpenBook	What information can this agent buy, under what guarantee of freshness/accuracy?
+5	Evolution Engine	Petri	How does this agent get measurably better over time?
+The unifying design principle, stated once so it can be repeated everywhere in the build: the LLM proposes, deterministic code disposes. The agent (an LLM-driven planner) can request any action — spend money, call a tool, buy data, delegate to a sub-agent — but Identity, Policy, and Treasury are non-LLM, deterministic services that approve or deny every request. No prompt, jailbreak, or hallucination can move money or exceed a budget, because the model never has direct write access to funds or permissions.
+
+2. Problem Statement & Vision
+Problem. As AI agents become capable of autonomous multi-step work (research, trading, procurement, coordination with other agents), three gaps block safe deployment at scale:
+
+No verifiable identity layer — you can't tell which agent did what, who owns it, or trust its track record across platforms.
+No enforceable spending boundary — "the LLM decided to spend $500" is currently a prompt-level promise, not a system-level guarantee.
+No standard way to buy tools/data with guarantees — agents either hard-code API keys (insecure, unmetered) or trust unverified data with no recourse when it's wrong or stale.
+Vision. A developer can register an agent, fund it, define hard financial/behavioral limits, and the agent can then autonomously discover tools and data, transact with other agents, and get measurably better — all while every dollar and every action is attributable, policy-checked, and auditable after the fact.
+
+3. Goals & Non-Goals
+Goals (v1 platform):
+
+Deterministic, non-bypassable spending control per agent (daily/per-tx/per-category limits, human-approval thresholds).
+Portable agent identity compatible with emerging open standards (see §7.3) rather than a proprietary silo.
+A metered marketplace where third parties can list tools and paid data feeds and get paid automatically per call.
+Agent-to-agent payments with the same identity/policy checks as agent-to-service payments.
+A safe, sandboxed way to evaluate and roll out improved versions of an agent without touching the production agent's credentials.
+Handle production-scale traffic (see §11) without the policy/treasury layer becoming the bottleneck.
+Non-goals (explicitly out of scope for v1):
+
+Building a general-purpose LLM or agent framework — AgentOS is infrastructure around agents, not the agent brain itself. Bring your own model/framework (LangGraph, custom, etc.); AgentOS exposes an SDK it talks to.
+Being a full custodial bank — AgentOS orchestrates policy and settlement; a licensed custodian/PSP or a non-custodial smart-contract wallet holds actual fiat/custody risk.
+Running your own L1 — AgentOS settles on existing chains via existing rails (see §7.3), it does not build new blockchain infrastructure.
+4. Personas
+Agent Developer — builds an agent (e.g., a DeFi treasury bot, a research assistant) and wants identity, budget control, and marketplace access without building all of this themselves.
+Guardian / Org Admin — a human or company legally responsible for an agent; sets policy, approves large transactions, can freeze an agent.
+Tool/Data Provider — lists a paid API or dataset on the marketplace; wants metering, payment guarantees, and SLA enforcement (get paid only if data was fresh/correct).
+Platform Operator (you) — runs AgentOS itself; needs observability, abuse prevention, and a billing model (small platform fee, or freemium + usage-based).
+5. Core Concepts & Glossary
+Term	Meaning
+Agent	A registered identity + wallet + policy bundle that an LLM-driven runtime acts on behalf of.
+Guardian	The human/entity accountable for an agent; can approve, pause, or terminate it.
+Policy	A declarative, versioned set of limits (budgets, allowed tools/chains, approval thresholds) evaluated deterministically before every spend.
+Treasury	The agent's fund custody abstraction — a smart-contract wallet or custodial sub-account, never accessed by the LLM directly.
+Tool	A callable, paid capability (e.g., "get liquidation risk") exposed via MCP or HTTP + x402.
+Dataset / Data Service	A paid, conditional information product with a defined freshness/accuracy SLA and refund logic.
+Receipt	A signed, immutable record of an executed, paid action — the audit trail unit.
+Candidate	An experimental new version of an agent's harness/prompt/policy produced by the Evolution Engine, not yet promoted to production.
+x402	Open HTTP-native micropayment protocol (HTTP 402 revived) used for per-call tool/data payment. Now governed by the Linux Foundation (moved April 2026), with V2 adding multi-chain support and reusable payment sessions — the natural payment rail for this platform.
+ERC-8004	Ethereum's "Trustless Agents" standard (Identity/Reputation/Validation on-chain registries), live on mainnet since Jan 2026, still evolving toward v2. AgentOS's Identity subsystem should be compatible with, not a replacement for, this standard so agents are portable outside your platform.
+6. System Architecture (Target End-State)
+6.1 High-level component diagram
+Marketplace Plane
+
+Core Control Plane
+
+A2A calls, same policy path
+
+candidate, sandboxed
+
+independent verification + human/policy approval
+
+Human Guardian
+
+Identity & Registry Service
+(Novi layer)
+
+Policy & Treasury Service
+(Cordon layer)
+
+Agent Runtime
+(Planner / Executor, customer-owned)
+
+API Gateway / x402 Payment Gate
+
+Tool Marketplace
+(OnchainRouter layer)
+
+Data Marketplace
+(OpenBook layer)
+
+Tool Providers
+
+Data Providers
+
+Payments & Ledger Service
+(x402 settlement, receipts)
+
+Settlement Chains
+(Base / Solana / others via x402)
+
+Other Agents
+
+Receipt / Audit Store
+
+Evolution Engine
+(Petri layer)
+
+Candidate Agent Version
+
+6.2 Service breakdown (AWS-style: each is an independently deployable, independently scalable service)
+Service	Responsibility	Talks to
+Identity Service	Agent registration, guardian linkage, org hierarchy, reputation aggregation, ERC-8004 mirroring	Policy, Marketplace, Evolution
+Policy Engine	Evaluate every proposed spend/action against versioned policy rules; hierarchical budget inheritance (a delegated child agent cannot exceed parent's remaining budget)	Treasury, everything that spends money
+Treasury Service	Custody abstraction over agent funds (smart-contract wallet or custodial ledger); signs payments only after Policy approval	Policy, Payments/Ledger
+Tool Marketplace (Router)	Tool registry, discovery (MCP/HTTP/SDK), pricing, provider onboarding, request routing	Payments/Ledger, Policy
+Data Marketplace	Dataset/service registry, freshness/accuracy SLA definitions, escrow-based conditional payment, refund logic	Payments/Ledger, Policy
+Payments & Ledger Service	x402 payment execution, settlement, double-entry ledger, receipt generation	Treasury, Chain adapters
+Evolution Engine (Petri)	Runs candidate agent versions in sandbox, benchmarks, mutation, independent verification, promotion workflow	Identity (to register new version), Receipt store (as training signal)
+Reputation/Verification	Aggregates receipts + validator scores into a portable reputation signal (mirrors ERC-8004 Reputation/Validation registries)	Identity, Evolution
+Gateway / Edge	AuthN, rate limiting, request routing, x402 challenge/response handling at the edge	Everything (single ingress)
+6.3 Key architectural decision: don't merge the five codebases
+Treat this exactly like AWS treats IAM vs. EC2 vs. S3 — separate services, separate datastores where it matters, one shared identity/auth layer, communicating over well-defined APIs and an event bus. This lets you scale, deploy, and even sell each subsystem independently later (e.g., the Policy Engine alone is a sellable product to any agent framework).
+
+7. Tech Stack (current as of Sept 2026)
+Pick this stack because it's the most boring, well-supported option at each layer — for financial infrastructure, boring is a feature, not a compromise.
+
+7.1 Application layer
+Layer	Choice	Why
+Backend services	Node.js 24 LTS (or Bun 1.x for latency-sensitive services) + TypeScript	Node 24 is the current LTS line (supported into 2028) with stable built-in TS type-stripping; one language across frontend/backend/SDKs reduces context-switching for a small team.
+API framework	Fastify (or Hono for edge-deployed services)	Fastify benchmarks far above Express for JSON-heavy microservices; Hono is ideal for Cloudflare Workers-style edge deployment of the payment gateway.
+Policy-critical services (Policy Engine, Treasury)	Go or Rust	These two services sit on the hot path of every dollar spent — you want predictable low-latency GC-free (Rust) or low-overhead GC (Go) behavior here, plus stronger type guarantees for money-handling code. This is the one place it's worth a second language.
+Frontend (dashboard, marketplace UI)	Next.js 16.2 (App Router, Partial Prerendering GA) on React 19	Current stable Next.js as of Sept 2026; PPR gives you fast static shells with streamed dynamic agent/ledger data.
+Agent SDKs	TypeScript + Python SDKs	Python because most agent frameworks (LangGraph, CrewAI, custom) are Python-first; TS for the web/Node ecosystem.
+7.2 Data & messaging layer
+Layer	Choice	Why
+Primary OLTP database	PostgreSQL 17 (managed: RDS/Aurora, Neon, or CockroachDB if you need multi-region strong consistency from day one)	Ledger and policy data need ACID guarantees; Postgres is the default-correct choice. Consider CockroachDB or Aurora DSQL if you know multi-region write scaling is coming early.
+Cache / hot policy lookups	Redis 7 / Valkey	Sub-millisecond policy/budget reads on the hot path; also used for idempotency keys and rate limiting.
+Event bus	Kafka (via Redpanda or MSK) or NATS JetStream for a smaller footprint	Every state change (spend approved, tool called, receipt issued) is an event — this is what feeds the Evolution Engine's telemetry and the audit trail, decoupled from request/response paths.
+Search / marketplace discovery	OpenSearch or Postgres full-text + pgvector	Tool/data marketplace discovery benefits from both keyword and semantic (embedding) search once you have >100 listings.
+Object storage	S3-compatible (S3, R2, or MinIO)	Receipts, agent version artifacts, benchmark logs.
+7.3 Payments & agent-identity layer (the part that's genuinely new in 2026)
+Layer	Choice	Why
+Micropayment protocol	x402 (V2)	Now governed by the Linux Foundation (moved April 2026) with founding members including Visa, Google, Stripe, AWS, Circle. V2 added multi-chain support, reusable payment sessions, and automatic service discovery — exactly the pattern needed for tool/data-marketplace metering. Zero protocol fees; cost is gas only.
+Settlement chains	Base (primary) + Solana (secondary)	Base and Solana are currently the two dominant x402 settlement rails; Solana's sub-second finality suits high-frequency, low-value agent traffic, Base has the deepest x402 tooling/facilitator support. Support both via a thin chain-adapter interface so you're not locked in.
+Stablecoin	USDC	The dominant settlement asset across the x402 ecosystem today.
+Agent identity standard	ERC-8004 (Trustless Agents), mirrored — not exclusively relied on	Live on Ethereum mainnet since Jan 2026 (Identity/Reputation/Validation registries), backed by Ethereum Foundation, Google, MetaMask, Coinbase, and deployable on L2s. Still formally in Draft/v2-in-progress, so treat it as one input to your Identity Service, not the sole source of truth — mirror your internal registry to it for portability/interoperability, don't hard-depend on it being stable.
+Wallets	Smart-contract wallets (ERC-4337 account abstraction) per agent, with the Guardian as a co-signer/recovery key	Lets Policy Engine enforce spend limits on top of the wallet, and lets a Guardian freeze/recover funds without holding the day-to-day signing key.
+Human-verification layer (optional, for high-trust flows)	World ID or equivalent proof-of-personhood	Useful when you need to prove "a real human authorized this agent's existence," which several 2026 agent-payment integrations (e.g., World's AgentKit) already use to address the "who's accountable" objection.
+7.4 Infrastructure & platform
+Layer	Choice	Why
+Compute	Kubernetes (EKS/GKE) for core services; Cloudflare Workers or similar edge runtime for the payment gateway/x402 challenge-response path	x402 has native support on Cloudflare Workers — putting the payment gate at the edge minimizes round-trip latency for the highest-QPS path.
+API gateway	Envoy or Kong, plus Cloudflare in front for DDoS/edge caching	
+Service mesh	Istio or Linkerd (once you're past ~10 services)	mTLS between services, fine-grained traffic policy, canary rollouts for Evolution Engine candidates.
+IaC	Terraform + Helm	
+CI/CD	GitHub Actions → progressive delivery via Argo Rollouts (canary/blue-green)	Every agent-version promotion from the Evolution Engine should literally be a canary rollout.
+Observability	OpenTelemetry → Grafana/Prometheus/Loki/Tempo (or Datadog if budget allows)	You need trace-level visibility into "which policy rule approved/denied this $0.02 spend," not just service-level metrics.
+Secrets/KMS	HashiCorp Vault or cloud-native KMS (AWS KMS/GCP KMS)	Agent signing keys and guardian recovery keys never touch application code directly.
+8. Data Model (core entities)
+Agent
+ ├─ agent_id (UUID, mirrored to ERC-8004 tokenId)
+ ├─ owner_org_id
+ ├─ guardian_id
+ ├─ wallet_address (smart contract wallet)
+ ├─ status (active | paused | terminated)
+ ├─ capabilities[] 
+ ├─ reputation_score
+ └─ current_policy_version_id
+
+Policy (versioned, immutable once published)
+ ├─ policy_id, agent_id, version
+ ├─ daily_budget, per_tx_max
+ ├─ allowed_chains[], allowed_tools[], allowed_categories[]
+ ├─ human_approval_threshold
+ └─ parent_policy_id (for delegated/child agents — cannot exceed parent's remaining budget)
+
+Treasury_Account
+ ├─ agent_id, chain, balance_cache
+ └─ last_reconciled_at
+
+Tool_Listing / Dataset_Listing
+ ├─ listing_id, provider_id, price, pricing_model (per-call | tiered)
+ ├─ sla (freshness_max_seconds, accuracy_requirement) [dataset only]
+ └─ endpoint (MCP/HTTP), schema
+
+Transaction
+ ├─ tx_id, agent_id, counterparty_id, listing_id
+ ├─ amount, chain, status (pending | settled | refunded)
+ ├─ policy_decision (allow/deny + rule matched)
+ └─ receipt_id
+
+Receipt (immutable, append-only)
+ ├─ receipt_id, tx_id, signed_payload, timestamp
+ └─ verification_status
+
+Agent_Version (Evolution Engine)
+ ├─ version_id, agent_id, parent_version_id
+ ├─ harness_diff / prompt_diff / policy_diff
+ ├─ benchmark_scores{}
+ ├─ verification_status (unverified | independently_verified)
+ └─ promoted_at (nullable)
+9. API Design (representative, not exhaustive)
+All external APIs are REST/JSON over HTTPS, gated at the edge by the x402 challenge-response flow where payment is required; internal service-to-service calls use gRPC.
+
+POST /v1/agents                       # register agent (Identity)
+POST /v1/agents/:id/policy            # publish new policy version (Policy)
+POST /v1/agents/:id/spend-intents     # agent proposes a spend -> sync allow/deny (Policy)
+GET  /v1/marketplace/tools            # discover tools (Router)
+GET  /v1/marketplace/data             # discover datasets (OpenBook)
+POST /v1/marketplace/tools/:id/call   # 402 Payment Required -> pay -> execute
+POST /v1/marketplace/data/:id/purchase# escrow purchase w/ SLA condition
+GET  /v1/receipts/:tx_id              # fetch signed receipt
+POST /v1/a2a/pay                      # agent-to-agent payment (same policy path)
+POST /v1/evolution/candidates         # submit a new candidate version
+POST /v1/evolution/candidates/:id/promote  # promote after verification + approval
+Example: the core "can I spend this?" contract, which is the single most important API in the whole platform —
+
+POST /v1/agents/agt_123/spend-intents
+{
+  "amount": "7.00",
+  "currency": "USDC",
+  "category": "data-purchase",
+  "counterparty": "listing_aave_apy_provider_b",
+  "chain": "base"
+}
+
+// Response (200 or 403)
+{
+  "decision": "allow",
+  "remaining_daily_budget": "63.00",
+  "matched_policy_rule": "category:data-purchase max $20/tx",
+  "requires_human_approval": false,
+  "spend_token": "opaque, single-use, expires in 30s"
+}
+The spend_token is what the Treasury Service requires before it will co-sign a payment — this is the mechanism that makes the LLM's decision advisory only; nothing spends without a token the Policy Engine issued.
+
+10. Security, Compliance & Trust Considerations
+Never let the LLM hold signing keys. Signing always happens in the Treasury Service after a Policy Engine token is presented; the agent runtime only ever sees a wallet address and a policy token, never a private key.
+Hierarchical budget enforcement must be enforced server-side at every level of delegation — a child agent's remaining budget is min(child_policy.remaining, parent_policy.remaining), recomputed on every request, not cached client-side.
+Idempotency everywhere on the payment path — every spend-intent and every x402 payment carries an idempotency key; duplicate requests (retries, network blips) must never double-spend.
+Human-approval thresholds are a hard synchronous gate — a spend above threshold blocks until an out-of-band approval (push notification, dashboard) is received, not just a warning log.
+Data marketplace SLA verification should use independent attestation (e.g., a second oracle or checksum comparison) before releasing escrowed funds — don't let the same party that sold the data also confirm the data was fresh.
+KYC/AML posture — even though x402 is non-custodial at the rail level, if you (the platform) ever touch fiat on/off-ramps or custody funds for users, you likely need a licensed partner (BaaS/PSP) or to operate under money-transmission exemptions; get counsel involved before mainnet launch with real user funds, not after.
+Regulatory note (evenhanded): agentic/autonomous payments are a genuinely unsettled regulatory area in most jurisdictions as of 2026 — treat compliance requirements as something to revisit each phase, not a one-time checkbox.
+Audit trail immutability — receipts are append-only and hash-chained (or anchored on-chain periodically) so a receipt can't be edited after the fact even by platform admins.
+11. Scaling to ~1,000,000 requests/second
+Be precise about what is doing 1M req/s — in this system, that's almost never 1M payment settlements/sec (no blockchain does that, and you don't want it to — most of these are microcents). It's much more likely to be 1M read-heavy requests/sec against tool/data discovery, policy checks, and cached balance lookups, with actual on-chain settlement batched or streamed at a far lower rate. Design for that distinction explicitly:
+
+11.1 Split the traffic by shape
+Traffic type	Realistic share at 1M rps	Strategy
+Marketplace discovery/search (read)	~40%	CDN + edge cache (Cloudflare), OpenSearch behind read replicas, aggressively cacheable (TTL seconds, not real-time)
+Policy "can I spend?" checks (read-mostly, must be fresh)	~30%	Redis-backed budget counters (atomic DECRBY/Lua scripts), Policy Engine horizontally scaled stateless pods, Postgres only as source of truth reconciled async
+Tool/data calls that don't need payment per call (session-based, x402 V2 reusable sessions)	~20%	Reusable payment sessions (a 2026 x402 V2 feature) avoid a full payment round-trip per call — session-check is a cheap signed-token verification, not a new blockchain transaction
+Actual new payment settlements	~10% (still ~100k/s at peak — batch this)	Batch/aggregate micro-payments where possible (e.g., session-based netting, periodic settlement) rather than one on-chain tx per call; use Solana for its sub-second finality where per-call settlement is unavoidable
+11.2 Concrete architectural patterns
+Stateless services + horizontal autoscaling (HPA/KEDA) for every service in the hot path (Policy Engine, Gateway, Tool Router). KEDA specifically so you can scale on queue depth / request rate, not just CPU.
+Multi-layer caching: CDN edge (Cloudflare) → regional Redis cluster (budget counters, listing metadata) → Postgres as source of truth. A policy check should resolve from Redis in the p50/p99 case; Postgres is only touched on cache miss or reconciliation.
+Database scaling: read replicas for all query-heavy paths; if write throughput on the ledger itself becomes the bottleneck, move to a distributed SQL store (CockroachDB / Aurora DSQL / Spanner-equivalent) that shards by agent_id — almost all hot-path queries are naturally scoped to a single agent, which makes this an easy sharding key.
+Async, event-driven settlement: the synchronous path only has to answer "is this allowed and here's a token" — actual chain settlement happens asynchronously off an event bus (Kafka/NATS), with the receipt written back once confirmed. This decouples "can I proceed" latency (must be <50ms) from "is this fully settled on-chain" latency (can be seconds).
+Rate limiting & abuse control at the edge (Cloudflare/Envoy) before requests ever reach application services — per-agent, per-IP, per-API-key token buckets, so a single misbehaving agent can't consume shared capacity.
+Circuit breakers and bulkheads between subsystems — if the Data Marketplace's upstream providers are slow, that must not back-pressure the Policy Engine's ability to approve unrelated spends.
+Multi-region active-active for the read-heavy discovery and policy-check paths, with a clear single source of truth for the ledger (either single-region-write-with-async-replication, or a distributed-consensus DB if you need multi-region writes for the ledger itself — this is the hardest part of the whole system, don't reach for it until you actually need it).
+Load testing target: before claiming 1M rps capability, prove it incrementally — k6/Gatling load tests per service with realistic traffic-shape ratios from the table above, not a single flat endpoint benchmark. Set SLOs (e.g., policy-check p99 < 50ms, tool-discovery p99 < 100ms) and gate deploys on them.
+11.3 The honest scaling order of operations
+Make the Policy Engine and Gateway stateless and horizontally scalable first — everything else depends on this being cheap to check.
+Push read-heavy discovery traffic to cache/CDN before you touch database scaling.
+Only shard/distribute the ledger database once you have real evidence it's the bottleneck — premature multi-region ledger consistency is the most common way teams over-engineer this and slow themselves down.
+12. Phased, Incremental Build & Deploy Plan
+This is the section that matches how you actually said you want to work: small slice → build → deploy to prod → manual test → confirm success → next slice. Each slice below is intentionally small enough to build in days, not weeks, and each has an explicit production go/no-go test.
+
+Phase 1 — Identity, Wallet & Policy (the only phase where money can move at all)
+Goal of the whole phase: an agent can safely hold and spend money, with nothing else built yet.
+
+Slice	What you build	Deploy & manual test in prod
+1.1	Agent Registry service: create/read agent record, no wallet yet	Deploy; manually create 3 test agents via API/curl; confirm records persist and are queryable
+1.2	Guardian linkage + basic auth (who can act as this agent's guardian)	Deploy; manually verify a non-guardian is rejected from modifying an agent
+1.3	Smart-contract wallet provisioning (ERC-4337) per agent, testnet chain only	Deploy; provision a wallet for a test agent; manually verify address is correct on a block explorer
+1.4	Policy Engine v1: single flat daily budget + per-tx max, no hierarchy yet	Deploy; manually send spend-intents above/below limits; confirm allow/deny matches expectations
+1.5	Treasury Service: co-signs a real (small, testnet) payment only when a valid Policy token is presented	Deploy; manually attempt a payment without a token (must fail) and with one (must succeed) on testnet
+1.6	Move Treasury/Policy from testnet to mainnet with a hard-capped tiny budget (e.g., $5 total)	Deploy; manually execute one real $0.10 payment end-to-end; verify on-chain and in your ledger
+1.7	Hierarchical policy (child agent budget ≤ parent's remaining)	Deploy; manually create a delegated agent, attempt to exceed parent budget, confirm denial
+Phase 1 exit criteria: a real agent, on mainnet, cannot spend a cent without Policy Engine approval, and hierarchical delegation is enforced — proven by manual test, not just unit tests.
+
+Phase 2 — Tool Marketplace
+Slice	What you build	Deploy & manual test
+2.1	Tool Registry (listing CRUD, no payment yet — free tools only)	Deploy; register 2–3 real read-only tools (e.g., a public Aave data endpoint you proxy); manually call via API
+2.2	x402 payment gate in front of one tool	Deploy; manually call the tool without payment (expect 402), then with payment (expect success + on-chain settlement)
+2.3	Wire tool calls through Policy Engine (category budgets: "data" vs "trading" etc.)	Deploy; manually attempt a tool call that exceeds category budget, confirm denial
+2.4	MCP-based discovery (so any MCP-compatible agent framework can find your tools)	Deploy; manually connect an MCP client and confirm tool listing + call works end-to-end
+2.5	External provider onboarding flow (a third party lists their own tool)	Deploy; onboard one real external provider; manually verify they receive payment for a call you make
+Phase 2 exit criteria: an external, real tool provider has been paid automatically at least once, policy-gated, with a receipt.
+
+Phase 3 — Data Marketplace
+Slice	What you build	Deploy & manual test
+3.1	Dataset Registry with a freshness SLA field (no escrow yet — direct payment)	Deploy; list one real dataset (e.g., a price feed); manually purchase and verify data returned
+3.2	Escrow-based conditional payment (pay only if SLA met)	Deploy; manually simulate a stale-data case and confirm refund path works, then a fresh-data case and confirm payout
+3.3	Independent freshness/accuracy verification (a second source checks the claim, not the seller)	Deploy; manually feed it one deliberately-stale response and confirm it's caught before payout
+3.4	Multiple providers competing on price/freshness for the same data type	Deploy; manually confirm agent (or you, manually) can compare and choose the cheaper/fresher option
+Phase 3 exit criteria: at least one real escrowed purchase has correctly refunded on a failed SLA and correctly paid out on a met SLA — both proven manually.
+
+Phase 4 — Agent-to-Agent Economy
+Slice	What you build	Deploy & manual test
+4.1	Agent-to-agent discovery (Agent A can look up Agent B's public identity/reputation)	Deploy; manually query Agent B's profile from Agent A's context
+4.2	A2A payment reusing the exact same Policy/Treasury path as tool payments	Deploy; manually trigger a real small A2A payment; confirm both ledgers update correctly
+4.3	ERC-8004 mirroring (write your Identity/Reputation data to the on-chain registries)	Deploy; manually verify an agent's record appears correctly in an ERC-8004 explorer
+4.4	Reputation scoring from accumulated receipts	Deploy; manually inspect that a handful of successful transactions visibly raise an agent's score
+Phase 4 exit criteria: two independently-registered agents have paid each other at least once, policy-gated, with the transaction reflected in both agents' receipts and reputation.
+
+Phase 5 — Evolution Engine
+Slice	What you build	Deploy & manual test
+5.1	Telemetry capture from production agent runs into the event bus (read-only, no mutation yet)	Deploy; manually confirm a real production run produces a telemetry event you can inspect
+5.2	Sandbox environment that can run a candidate version with zero access to real funds/policy	Deploy; manually run a candidate against replayed historical requests; confirm it cannot touch production Treasury
+5.3	Benchmark suite (task success rate, cost per task, latency)	Deploy; manually compare v1 vs. a hand-edited "v2" candidate on the same benchmark tasks
+5.4	Independent verification step (a separate process/service re-scores the candidate, not the same code that produced it)	Deploy; manually confirm a candidate that "cheats" the benchmark (e.g., overfits) is still caught by independent scoring
+5.5	Promotion workflow with human/policy approval gate	Deploy; manually promote one verified candidate to production and confirm the production agent now runs the new version
+Phase 5 exit criteria: one real candidate version has gone through mutate → benchmark → independently verify → human-approve → promote, entirely without touching production credentials until the final approved step.
+
+13. Metrics That Matter Per Phase
+Phase 1: zero unauthorized spends (target: 0, forever — this is a correctness bar, not an optimization target); policy-check p99 latency.
+Phase 2: # of external tool calls settled automatically; provider payout success rate.
+Phase 3: SLA breach detection rate (stale data caught vs. missed); refund correctness.
+Phase 4: # of distinct agent pairs transacting; reputation score correlation with actual successful-transaction rate.
+Phase 5: % of promoted candidates that outperform production on held-out benchmark after promotion (catches overfitting to the benchmark itself).
+14. Risks & Mitigations
+Risk	Mitigation
+Policy Engine becomes a single point of failure/bottleneck	Stateless, horizontally scaled, Redis-cached budget state, fail-closed (deny on Policy Engine unavailability, never fail-open)
+Regulatory uncertainty around autonomous agent payments	Start with tiny real-money caps (Phase 1.6's $5 example), keep a licensed-partner integration path open, get counsel review before scaling real-user funds
+ERC-8004/x402 standards still evolving (v2 in progress)	Treat both as pluggable adapters, not hard dependencies baked into core schemas
+SLA verification collusion (seller and verifier are effectively the same party)	Require a genuinely independent verifier/oracle before any escrow release
+Evolution Engine promotes an overfit or unsafe candidate	Independent verification + human approval gate is mandatory, never automatic promotion in v1
+15. References
+x402 protocol / Linux Foundation governance move (April 2026)
+ERC-8004 "Trustless Agents" standard, live on Ethereum mainnet (Jan 2026), still in Draft/v2 development
+Node.js 24 LTS, Next.js 16.2 (current stable as of Sept 2026)
+This PRD is intentionally structured so each phase/slice can be handed to an engineer (or an AI coding agent) as a standalone ticket. If you want, the next artifacts to generate from this are: (a) a detailed API/OpenAPI spec for Phase 1, or (b) a Terraform/Helm skeleton for the Phase 1 services.
