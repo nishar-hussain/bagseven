@@ -1,0 +1,3 @@
+module.exports=[5663,(a,b,c)=>{let{createClientModuleProxy:d}=a.r(5208);a.n(d("[project]/node_modules/.pnpm/next@16.3.5_@types+node@26.6.1_react-dom@19.3.0_react@19.3.0__react@19.3.0/node_modules/next/dist/client/components/builtin/global-error.js"))},81668,a=>{"use strict";var b=a.i(5663);a.n(b)},92739,function(a){a.n(a.i(81668))}];
+
+//# sourceMappingURL=0aib_next_dist_client_components_builtin_global-error_18srzmg.js.map

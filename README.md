@@ -9,9 +9,9 @@ See `docs/DECISIONS.md` for the hard invariants the build encodes (spend_token, 
 ## Repository layout
 
 ```
-apps/console          # Next.js dashboard (not yet built)
+apps/console          # Next.js developer console (browser UI for the Phase-1 flows)
 services/             # independently deployable services
-  gateway/            # single public ingress: envelope auth, rate limit, routing
+  gateway/            # single public ingress: envelope auth, rate limit, routing, CORS
   identity/           # agents, orgs, guardians
   policy/             # budgets, limits, delegation, spend_token issuance
   treasury/           # wallets, reservations, co-signing, signer abstraction
@@ -46,10 +46,24 @@ pnpm exec tsx scripts/gen-policy-key.ts
 ## Run
 
 ```bash
-pnpm dev                   # or start each service individually via `pnpm --filter @agentos/<svc> start`
+pnpm dev                   # boots all 5 services + the console (Turbo TUI dashboard)
 ```
 
-Services (defaults): gateway `:4000`, identity `:4001`, treasury `:4002`, policy `:4003`, verification `:4004`.
+Or start pieces individually via `pnpm --filter @agentos/<svc> start`. Services (defaults): gateway `:4000`, identity `:4001`, treasury `:4002`, policy `:4003`, verification `:4004`.
+
+## Console
+
+The browser UI at **http://localhost:3000** walks the full Phase-1 flow in five steps:
+
+1. **Create agent** — org → guardian → agent → guardian confirms to `active`
+2. **Wallet & funds** — provision wallet, credit USDC (dev faucet)
+3. **Policy** — daily budget, max per tx, category limits, approval threshold
+4. **Spend intents** — propose spends: `$500 → deny`, in-limit → `allow` + spend_token, plus an idempotent-retry button
+5. **Reserve & settle** — present the token to the treasury, settle, watch balance + receipt
+
+The console signs request envelopes in the browser with WebCrypto (Ed25519) — no private key leaves the page except the agent's signing key shown once at creation. Session state lives in `localStorage`.
+
+To point the console at a different gateway: `NEXT_PUBLIC_GATEWAY_URL=https://… pnpm --filter @agentos/console dev` (default `http://localhost:4000`).
 
 ## Verify Phase 1 end-to-end
 

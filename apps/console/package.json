@@ -3,9 +3,22 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "build": "echo \"console: not implemented yet\"",
-    "typecheck": "echo \"console: not implemented yet\"",
-    "lint": "echo \"console: not implemented yet\"",
-    "test": "echo \"console: not implemented yet\""
+    "dev": "next dev --port 3000",
+    "build": "next build",
+    "start": "next start --port 3000",
+    "lint": "eslint . --max-warnings=0",
+    "typecheck": "tsc --noEmit",
+    "test": "echo \"console: no unit tests yet\""
+  },
+  "dependencies": {
+    "next": "^16.3.5",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.1",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "typescript": "^5.7.0"
   }
 }

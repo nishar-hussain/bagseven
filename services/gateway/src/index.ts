@@ -4,6 +4,7 @@ import { createDb, agents } from '@agentos/db';
 import { eq } from 'drizzle-orm';
 import { Redis } from 'ioredis';
 import { ApiError, envelopeAuth, rateLimit, createService } from '@agentos/server';
+import cors from '@fastify/cors';
 
 interface Upstream {
   baseUrl: string;
@@ -49,6 +50,11 @@ async function proxy(req: FastifyRequest, reply: FastifyReply, cfg: NodeJS.Proce
 const BOOTSTRAP_PREFIXES = ['/healthz', '/v1/organizations', '/v1/guardians', '/v1/agents'];
 
 export function buildGatewayRoutes(app: FastifyInstance, { db, redis, config }: { db: ReturnType<typeof createDb>; redis: Redis; config: NodeJS.ProcessEnv }): void {
+  void app.register(cors, {
+    origin: config.CORS_ORIGIN === '*' ? true : (config.CORS_ORIGIN ?? 'http://localhost:3000').split(','),
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  });
+
   app.addHook('preHandler', rateLimit(redis, { limit: Number(config.RATE_LIMIT_PER_AGENT ?? 50), windowSeconds: 1 }));
 
   app.addHook('preHandler', async (req, reply) => {

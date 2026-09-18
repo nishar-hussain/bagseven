@@ -1,0 +1,199 @@
+'use client';
+
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { ConsoleClient } from '../lib/client';
+import { EMPTY_SESSION, type LogEntry, type Session, type StepKey, type Toast } from '../lib/types';
+import { Card, Copy, KV } from '../components/ui';
+import { StepBootstrap, StepWallet, StepPolicy, StepSpend, StepSettle, type StepProps } from '../components/steps';
+
+const STEPS: Array<{ key: StepKey; label: string; hint: string }> = [
+  { key: 'bootstrap', label: 'Create agent', hint: 'org · guardian · identity' },
+  { key: 'wallet', label: 'Wallet & funds', hint: 'provision · credit' },
+  { key: 'policy', label: 'Policy', hint: 'limits · thresholds' },
+  { key: 'spend', label: 'Spend intents', hint: 'allow · deny · token' },
+  { key: 'settle', label: 'Reserve & settle', hint: 'co-sign · receipt' },
+];
+
+const ORDER: StepKey[] = ['bootstrap', 'wallet', 'policy', 'spend', 'settle'];
+
+function isDone(s: Session, key: StepKey): boolean {
+  switch (key) {
+    case 'bootstrap':
+      return !!s.agentId && s.agentStatus === 'active';
+    case 'wallet':
+      return !!s.walletId;
+    case 'policy':
+      return !!s.policy;
+    case 'spend':
+      return s.spendHistory.length > 0;
+    case 'settle':
+      return !!s.txHash;
+  }
+}
+
+let toastId = 0;
+let logId = 0;
+
+export default function Page() {
+  const gateway = process.env.NEXT_PUBLIC_GATEWAY_URL ?? 'http://localhost:4000';
+  const client = useMemo(() => new ConsoleClient(gateway), [gateway]);
+
+  const [session, setSession] = useState<Session>(EMPTY_SESSION);
+  const [active, setActive] = useState<StepKey>('bootstrap');
+  const [busy, setBusy] = useState<string | null>(null);
+  const [feed, setFeed] = useState<LogEntry[]>([]);
+  const [toasts, setToasts] = useState<Toast[]>([]);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem('agentos-session');
+      if (raw) {
+        const s = JSON.parse(raw) as Session;
+        setSession(s);
+        if (s.agentId && s.signingKeyPem) client.setAgent(s.agentId, s.signingKeyPem);
+      }
+    } catch {
+      /* ignore */
+    }
+  }, [client]);
+
+  const persist = useCallback((s: Session) => {
+    setSession(s);
+    try {
+      localStorage.setItem('agentos-session', JSON.stringify(s));
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  const toast = useCallback((kind: Toast['kind'], message: string) => {
+    const id = ++toastId;
+    setToasts((t) => [...t, { id, kind, message }]);
+    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 4200);
+  }, []);
+
+  const pushLog = useCallback((kind: LogEntry['kind'], text: string) => {
+    setFeed((f) => [{ id: ++logId, kind, text }, ...f].slice(0, 60));
+  }, []);
+
+  const run: StepProps['run'] = useCallback(
+    async (name, fn) => {
+      setBusy(name);
+      pushLog('in', name);
+      try {
+        await fn();
+        pushLog('ok', name);
+      } catch (err) {
+        const e = err as { code?: string; message?: string };
+        pushLog('err', name);
+        toast('error', `${e.code ?? 'Error'}: ${e.message ?? String(err)}`);
+      } finally {
+        setBusy(null);
+      }
+    },
+    [pushLog, toast],
+  );
+
+  const onNext = useCallback(() => {
+    setActive((cur) => ORDER[Math.min(ORDER.indexOf(cur) + 1, ORDER.length - 1)]!);
+  }, []);
+
+  const stepProps: StepProps = { session, client, busy, persist, run, toast, onNext };
+  const current = STEPS.find((s) => s.key === active)!;
+  const doneCount = ORDER.filter((k) => isDone(session, k)).length;
+
+  const reset = () => {
+    localStorage.removeItem('agentos-session');
+    setSession(EMPTY_SESSION);
+    setFeed([]);
+    setActive('bootstrap');
+    toast('info', 'Session reset');
+  };
+
+  return (
+    <>
+      <header className="topbar">
+        <div className="brand">
+          <span className="dot" />
+          AgentOS
+          <span className="sub">Console</span>
+        </div>
+        <div className="spacer" />
+        <span className="chip">
+          <span className="led" />
+          {gateway}
+        </span>
+      </header>
+
+      <div className="shell">
+        <aside className="sidebar">
+          <Card title="Setup flow">
+            <div className="steps">
+              {STEPS.map((s) => (
+                <button
+                  key={s.key}
+                  className={`step-item ${active === s.key ? 'active' : ''} ${isDone(session, s.key) ? 'done' : ''}`}
+                  onClick={() => setActive(s.key)}
+                >
+                  <span className="step-num">{isDone(session, s.key) ? '✓' : ORDER.indexOf(s.key) + 1}</span>
+                  <span>
+                    <span className="step-label">{s.label}</span>
+                    <br />
+                    <span className="muted small">{s.hint}</span>
+                  </span>
+                </button>
+              ))}
+            </div>
+            <div className="spread mt-10">
+              <span className="small muted">{doneCount}/{STEPS.length} complete</span>
+              <button className="copy" onClick={reset}>reset session</button>
+            </div>
+          </Card>
+
+          {session.agentId && (
+            <Card title="Agent">
+              <KV k="status" v={session.agentStatus} />
+              <KV k="org" v={session.orgName} />
+              <KV k="agent_id" v={<span>{session.agentId.slice(0, 12)}… <Copy value={session.agentId} /></span>} />
+              <KV k="wallet" v={session.walletAddress ? session.walletAddress.slice(0, 10) + '…' : '—'} />
+              <KV k="policy" v={session.policy ? `v${session.policy.version}` : '—'} />
+              {session.balances.map((b) => (
+                <KV key={b.token} k={`${b.token} balance`} v={`${Number(b.amount).toFixed(2)} (${Number(b.reservedAmount).toFixed(2)} reserved)`} />
+              ))}
+              <KV k="settlements" v={session.txHash ? '1 ✓' : '0'} />
+            </Card>
+          )}
+
+          <Card title="Activity">
+            <div className="feed">
+              {feed.length === 0 && <span className="empty">No activity yet.</span>}
+              {feed.map((e) => (
+                <div key={e.id} className={`entry ${e.kind === 'ok' ? 'ok' : e.kind === 'err' ? 'err' : ''}`}>
+                  <span className="tick">{e.kind === 'in' ? '→' : e.kind === 'ok' ? '✓' : '✗'}</span>
+                  <span>{e.text}</span>
+                </div>
+              ))}
+            </div>
+          </Card>
+        </aside>
+
+        <main>
+          {current.key === 'bootstrap' && <StepBootstrap {...stepProps} />}
+          {current.key === 'wallet' && <StepWallet {...stepProps} />}
+          {current.key === 'policy' && <StepPolicy {...stepProps} />}
+          {current.key === 'spend' && <StepSpend {...stepProps} />}
+          {current.key === 'settle' && <StepSettle {...stepProps} />}
+        </main>
+      </div>
+
+      <div className="toasts">
+        {toasts.map((t) => (
+          <div key={t.id} className={`toast ${t.kind === 'ok' ? 'ok' : t.kind === 'error' ? 'error' : ''}`}>
+            <span className="mark">{t.kind === 'ok' ? '✓' : t.kind === 'error' ? '✗' : 'ℹ'}</span>
+            <span>{t.message}</span>
+          </div>
+        ))}
+      </div>
+    </>
+  );
+}

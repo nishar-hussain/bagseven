@@ -23,6 +23,7 @@
     "@agentos/auth": "workspace:*",
     "@agentos/db": "workspace:*",
     "@agentos/server": "workspace:*",
+    "@fastify/cors": "^11.3.0",
     "drizzle-orm": "^0.45.2",
     "fastify": "^5.12.5",
     "ioredis": "^6.0.0",
