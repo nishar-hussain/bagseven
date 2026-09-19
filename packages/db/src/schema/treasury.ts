@@ -1,7 +1,7 @@
 import { pgTable, uuid, text, timestamp, numeric, index, uniqueIndex, primaryKey, pgEnum } from 'drizzle-orm/pg-core';
 import { agents } from './identity.js';
 
-export const custodyType = pgEnum('custody_type', ['mpc', 'hsm', 'smart-account', 'dev']);
+export const custodyType = pgEnum('custody_type', ['mpc', 'hsm', 'smart-account', 'dev', 'eoa']);
 export const walletStatus = pgEnum('wallet_status', ['active', 'frozen', 'swept']);
 export const reservationStatus = pgEnum('reservation_status', ['held', 'committed', 'released', 'expired']);
 export const settlementStatus = pgEnum('settlement_status', ['pending', 'confirmed', 'failed']);

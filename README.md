@@ -88,3 +88,47 @@ The concurrency suite (`services/policy/src/counters.integration.test.ts`) is th
 1. Agent proposes a spend → `POST /v1/spend-intents` → Policy evaluates (static rules) + atomic Redis budget gate (Lua) → on ALLOW issues a signed, single-use, 30s-expiry **spend_token** bound to amount/currency/chain/category/counterparty.
 2. Treasury co-signs a payment only on presentation of a valid token (`POST /v1/reservations`), then `commit` settles it: debits the payer, credits the payee, writes a hash-chained receipt.
 3. Delegation: a child's spend atomically decrements every ancestor's remaining budget (`spend:child:{anc}` counters), so no chain of sub-agents can exceed the parent's cap.
+
+## Real wallets on Base testnet (slice 1.6)
+
+Two signer modes behind the same interface:
+
+| Mode | Addresses | Settlement |
+|---|---|---|
+| `SIGNER_MODE=dev` (default) | fabricated from a hash | simulated tx hashes |
+| `SIGNER_MODE=real` | **real EOA** derived per agent (`sha256(agentSeed:agentId:chain)`) | **real on-chain transactions** (viem) |
+
+In `real` mode the treasury holds a **master account** (`TREASURY_MASTER_PRIVATE_KEY`). The dev faucet credit becomes a real token transfer from master → agent (plus a small native gas grant so the agent can pay its own gas), and commit broadcasts a real ERC-20 `transfer` to the payee's real address.
+
+### Test locally with Anvil (no faucet needed)
+
+```bash
+# 1. Run a local EVM chain that mimics Ethereum Sepolia (chain id 11155111)
+docker run -d --name agentos-anvil -p 8545:8545 ghcr.io/foundry-rs/foundry:stable "anvil --host 0.0.0.0 --chain-id 11155111 --silent"
+
+# 2. Deploy a mock USDC + mint to the master account (prints MOCK_USDC + master address)
+node scripts/deploy-mock-usdc.mjs
+
+# 3. Point the stack at it
+cat >> .env <<'EOF'
+SIGNER_MODE=real
+TREASURY_AGENT_SEED=local-test-seed
+TREASURY_MASTER_PRIVATE_KEY=0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80
+SEPOLIA_RPC_URL=http://localhost:8545
+SEPOLIA_USDC=<MOCK_USDC from step 2>
+GAS_GRANT_NATIVE=0.01
+EOF
+# restart the services, then:
+pnpm exec tsx scripts/e2e-real.ts
+```
+
+`scripts/e2e-real.ts` proves the full flow with real transactions: two agents get real addresses, A is funded 100 USDC on-chain, A commits a $3 payment to B, and the token contract itself shows A=97 / B=3 USDC.
+
+### Test on real Ethereum Sepolia
+
+1. Create a wallet for the master account and fund it with testnet ETH + USDC:
+   - Sepolia faucets: `https://faucet.quicknode.com/ethereum/sepolia`, `https://www.alchemy.com/faucets/ethereum-sepolia` (ETH for gas), and Circle's testnet faucet for USDC.
+2. Set `SEPOLIA_RPC_URL=https://ethereum-sepolia-rpc.publicnode.com` (or any public Sepolia RPC), `SEPOLIA_USDC=0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238`, and `TREASURY_MASTER_PRIVATE_KEY` to that wallet's key.
+3. Restart and run `scripts/e2e-real.ts` — the same code, broadcasting to the real testnet. Verify the tx hashes on the [Sepolia explorer](https://sepolia.etherscan.io).
+
+> Note: `real` mode uses derived software keys (`eoa` custody type). This is correct for testnet and local verification; production custody should swap in MPC/smart-account custody behind the same `Signer` interface — the reservation/policy code does not change.

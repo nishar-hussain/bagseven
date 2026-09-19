@@ -6,12 +6,33 @@ import type { Redis } from 'ioredis';
  * (or across a delegated chain) cannot both pass a budget check before either
  * increments — the exact race that would allow double-spend under load.
  *
+ * Counters are stored as INTEGER micro-units (1e-6 of a unit) because Redis
+ * INCRBY only accepts integers. Amounts/budgets are converted via toMicroUnits.
+ *
  * Agent counters:   spend:d:{agent}:{YYYY-MM-DD}   (daily)
  *                   spend:m:{agent}:{YYYY-MM}      (monthly)
  *                   spend:c:{agent}:{YYYY-MM-DD}:{category}
  * Ancestor counters: spend:d:{anc}:{YYYY-MM-DD}    (ancestor own spend)
  *                    spend:child:{anc}:{YYYY-MM-DD} (aggregate descendant spend)
  */
+
+const SCALE = 1_000_000n;
+
+/** "3.5" -> "3500000"; "0.000001" -> "1". Precise — no floating point. */
+export function toMicroUnits(amount: string): string {
+  const [int = '0', frac = ''] = amount.split('.');
+  const fracPadded = `${frac}000000`.slice(0, 6);
+  const units = BigInt(int) * SCALE + BigInt(fracPadded);
+  return units.toString();
+}
+
+/** "3500000" -> "3.5"; "3" -> "3". */
+export function fromMicroUnits(units: string): string {
+  const u = BigInt(units);
+  const int = u / SCALE;
+  const frac = (u % SCALE).toString().padStart(6, '0').replace(/0+$/, '');
+  return frac ? `${int}.${frac}` : `${int}`;
+}
 
 const CHECK_AND_INCREMENT_LUA = `
 local amount = tonumber(ARGV[1])
@@ -85,7 +106,7 @@ export interface BudgetResult {
   newDailySpent: string;
 }
 
-const num = (v: string | null): string => (v === null || v === undefined ? '-1' : v);
+const num = (v: string | null): string => (v === null || v === undefined ? '-1' : toMicroUnits(v));
 
 export async function checkAndIncrement(redis: Redis, input: BudgetInput): Promise<BudgetResult> {
   const d = dayKey();
@@ -100,11 +121,11 @@ export async function checkAndIncrement(redis: Redis, input: BudgetInput): Promi
   }
 
   const argv = [
-    input.amount,
+    toMicroUnits(input.amount),
     num(input.dailyBudget),
     num(input.monthlyBudget),
     num(input.categoryDailyLimit),
-    ...input.ancestors.map((a) => a.dailyBudget),
+    ...input.ancestors.map((a) => toMicroUnits(a.dailyBudget)),
   ];
 
   const [allowed, reason] = (await redis.eval(CHECK_AND_INCREMENT_LUA, keys.length, ...keys, ...argv)) as [number, string];
@@ -112,12 +133,12 @@ export async function checkAndIncrement(redis: Redis, input: BudgetInput): Promi
   const dailyKey = keys[0];
   if (!dailyKey) throw new Error('daily counter key missing');
   const newDailySpent = (await redis.get(dailyKey)) ?? '0';
-  return { allowed: allowed === 1, reason: allowed === 1 ? undefined : reason, newDailySpent };
+  return { allowed: allowed === 1, reason: allowed === 1 ? undefined : reason, newDailySpent: fromMicroUnits(newDailySpent) };
 }
 
 export async function currentSpend(redis: Redis, agentId: string, category: string): Promise<{ daily: string; category: string }> {
   const d = dayKey();
   const daily = (await redis.get(`spend:d:${agentId}:${d}`)) ?? '0';
   const cat = (await redis.get(`spend:c:${agentId}:${d}:${category}`)) ?? '0';
-  return { daily, category: cat };
+  return { daily: fromMicroUnits(daily), category: fromMicroUnits(cat) };
 }

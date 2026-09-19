@@ -3,7 +3,26 @@ import { and, eq, lt, sql } from 'drizzle-orm';
 import { Redis } from 'ioredis';
 import { createService, sweepStuckIdempotency } from '@agentos/server';
 import { buildTreasuryRoutes } from './routes.js';
-import { registerDevSigner } from './signer.js';
+import { registerDevSigner, registerRealSigner } from './signer.js';
+import { loadChainSpecs } from './chains.js';
+
+function registerSigners(): void {
+  const mode = process.env.SIGNER_MODE ?? 'dev';
+  if (mode === 'real') {
+    const seed = process.env.TREASURY_AGENT_SEED;
+    const masterKey = process.env.TREASURY_MASTER_PRIVATE_KEY;
+    if (!seed) throw new Error('SIGNER_MODE=real requires TREASURY_AGENT_SEED');
+    if (!masterKey) throw new Error('SIGNER_MODE=real requires TREASURY_MASTER_PRIVATE_KEY');
+    const specs = loadChainSpecs(process.env);
+    for (const [chain, spec] of Object.entries(specs)) {
+      registerRealSigner(chain, spec, seed, masterKey);
+    }
+    console.warn('[treasury] REAL signer enabled — broadcasting transactions on-chain. Production requires MPC custody.');
+  } else {
+    const chains = (process.env.SUPPORTED_CHAINS ?? 'sepolia').split(',');
+    for (const chain of chains) registerDevSigner(chain.trim());
+  }
+}
 
 async function expireReservations(): Promise<void> {
   const db = createDb({
@@ -30,8 +49,7 @@ async function main(): Promise<void> {
   });
   const redis = new Redis(process.env.REDIS_URL ?? 'redis://localhost:6379');
 
-  const chains = (process.env.SUPPORTED_CHAINS ?? 'base-sepolia').split(',');
-  for (const chain of chains) registerDevSigner(chain.trim());
+  registerSigners();
 
   setInterval(() => {
     expireReservations().catch((err) => console.error('[treasury] expire job failed', err));

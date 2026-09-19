@@ -136,7 +136,7 @@ export function buildPolicyRoutes(app: FastifyInstance, { db, redis, config }: S
   app.post('/v1/spend-intents', async (req) => {
     const body = spendIntentSchema.parse(req.body);
     const action = normalizeAction(body);
-    const chain = action.chain ?? config.DEFAULT_CHAIN ?? 'base-sepolia';
+    const chain = action.chain ?? config.DEFAULT_CHAIN ?? 'sepolia';
 
     const agent = await db.query.agents.findFirst({ where: eq(agents.id, body.agent_id) });
     if (!agent) throw new ApiError(404, 'NOT_FOUND', 'agent not found');

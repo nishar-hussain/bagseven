@@ -29,6 +29,7 @@ export interface SpendRecord {
   amount: string;
   category: string;
   chain: string;
+  counterparty_id: string;
   decision: string;
   reason?: string;
   decision_id: string;

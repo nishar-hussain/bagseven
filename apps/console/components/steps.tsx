@@ -106,7 +106,7 @@ export function StepWallet(props: StepProps) {
 
   const provision = () =>
     run('provision wallet', async () => {
-      await client.provisionWallet(session.agentId, 'base-sepolia');
+      await client.provisionWallet(session.agentId, 'sepolia');
       const next = await refresh(session);
       persist(next);
       toast('ok', 'Wallet provisioned');
@@ -125,7 +125,7 @@ export function StepWallet(props: StepProps) {
   return (
     <Card title="Wallet & funds" action={<AgentBar session={session} />}>
       <p className="section-hint">
-        Provisions a treasury wallet on <code>base-sepolia</code> (dev signer) and credits test USDC via the dev
+        Provisions a treasury wallet on <code>sepolia</code> (dev signer) and credits test USDC via the dev
         faucet. The wallet is the only place an agent can hold funds.
       </p>
       {!session.walletId ? (
@@ -173,7 +173,7 @@ export function StepPolicy(props: StepProps) {
         agent_id: session.agentId,
         daily_budget: daily,
         max_transaction: maxTx,
-        allowed_chains: ['base-sepolia'],
+        allowed_chains: ['sepolia'],
         allowed_categories: ['trading', 'data-purchase'],
         category_limits: { 'data-purchase': { daily_budget: catBudget, max_per_tx: catPerTx } },
         human_approval_threshold: threshold,
@@ -248,7 +248,7 @@ export function StepSpend(props: StepProps) {
           amount: amt,
           currency: 'USDC',
           category: cat,
-          chain: 'base-sepolia',
+          chain: 'sepolia',
           counterparty_id: counterparty,
         },
         idemKey,
@@ -257,7 +257,8 @@ export function StepSpend(props: StepProps) {
         at: new Date().toISOString().slice(11, 19),
         amount: amt,
         category: cat,
-        chain: 'base-sepolia',
+        chain: 'sepolia',
+        counterparty_id: counterparty,
         decision: d.decision,
         reason: d.reason,
         decision_id: d.decision_id,
@@ -372,22 +373,26 @@ export function StepSettle(props: StepProps) {
     run('reserve + commit', async () => {
       if (!session.lastDecision?.spend_token) throw new Error('get an allow decision first (step 4)');
       if (!session.walletId) throw new Error('provision a wallet first (step 2)');
-      const counterpartyId = crypto.randomUUID();
+      const token = session.lastDecision.spend_token;
+      // The token is bound to this exact counterparty — reuse it, never mint a new one.
+      const counterpartyId = session.lastDecision.counterparty_id;
       const res = await client.reserve(
         {
           wallet_id: session.walletId,
           token: 'USDC',
           amount: session.lastDecision.amount,
-          spend_token: session.lastDecision.spend_token,
+          spend_token: token,
           counterparty_id: counterpartyId,
           counterparty_type: cpType,
         },
         `reserve-${Date.now()}`,
       );
+      // Token is single-use: consume it immediately so the button can't reuse it.
+      const consumed: Session = { ...session, lastDecision: { ...session.lastDecision, spend_token: undefined } };
       const commit = await client.commitReservation(res.reservation_id);
       const receipts = await client.getAgentReceipts(session.agentId);
       const next = {
-        ...session,
+        ...consumed,
         reservationId: res.reservation_id,
         txHash: commit.tx_hash,
         receiptId: receipts.receipts[0]?.id,
@@ -401,6 +406,10 @@ export function StepSettle(props: StepProps) {
       <p className="section-hint">
         Presents the last <code>spend_token</code> to the treasury — the only thing it will co-sign against — then
         settles: debit payer → credit payee → hash-chained receipt.
+      </p>
+      <p className="section-hint" style={{ marginTop: -8 }}>
+        <span className="pill warn">single-use · 30s expiry</span> If the token expired (you waited too long), create a
+        fresh allow decision in step 4 and come back.
       </p>
       <Field label="Counterparty type">
         <Select value={cpType} onChange={(e) => setCpType(e.target.value as 'agent')}>

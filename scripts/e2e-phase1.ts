@@ -49,7 +49,7 @@ async function main(): Promise<void> {
   const agentClient = new Client({ baseUrl: GATEWAY, agentId: agent.agent_id, privateKeyPem: agent.signing_private_key_pem });
 
   // 1.3 Provision wallet + fund via dev faucet
-  const wallet = await agentClient.provisionWallet({ agent_id: agent.agent_id, chain: 'base-sepolia' });
+  const wallet = await agentClient.provisionWallet({ agent_id: agent.agent_id, chain: 'sepolia' });
   log('provision wallet (slice 1.3)', !!wallet.wallet.address, { wallet_id: wallet.wallet.id, address: wallet.wallet.address });
 
   const funded = await agentClient.creditWallet(wallet.wallet.id, { token: 'USDC', amount: '100.00' });
@@ -60,7 +60,7 @@ async function main(): Promise<void> {
     agent_id: agent.agent_id,
     daily_budget: '50.00',
     max_transaction: '20.00',
-    allowed_chains: ['base-sepolia'],
+    allowed_chains: ['sepolia'],
     allowed_categories: ['trading', 'data-purchase'],
     category_limits: { 'data-purchase': { daily_budget: '10.00', max_per_tx: '5.00' } },
     human_approval_threshold: '15.00',
@@ -71,7 +71,7 @@ async function main(): Promise<void> {
   // 1.4 Over-limit spend -> deterministic DENY
   const denied = await agentClient.proposeSpend(
     agent.agent_id,
-    { amount: '500.00', currency: 'USDC', category: 'trading', chain: 'base-sepolia', counterparty: COUNTERPARTY },
+    { amount: '500.00', currency: 'USDC', category: 'trading', chain: 'sepolia', counterparty: COUNTERPARTY },
     'idem-1',
   );
   log('over-limit spend DENIED', denied.decision === 'deny', denied.reason);
@@ -79,7 +79,7 @@ async function main(): Promise<void> {
   // 1.4 In-limit spend -> ALLOW + spend_token
   const allowed = await agentClient.proposeSpend(
     agent.agent_id,
-    { amount: '3.00', currency: 'USDC', category: 'data-purchase', chain: 'base-sepolia', counterparty: COUNTERPARTY },
+    { amount: '3.00', currency: 'USDC', category: 'data-purchase', chain: 'sepolia', counterparty: COUNTERPARTY },
     'idem-2',
   );
   log('in-limit spend ALLOWED + token (slice 1.5)', allowed.decision === 'allow' && !!allowed.spend_token, {
@@ -90,7 +90,7 @@ async function main(): Promise<void> {
   // D5 idempotency: same intent + same key -> same decision_id
   const allowedAgain = await agentClient.proposeSpend(
     agent.agent_id,
-    { amount: '3.00', currency: 'USDC', category: 'data-purchase', chain: 'base-sepolia', counterparty: COUNTERPARTY },
+    { amount: '3.00', currency: 'USDC', category: 'data-purchase', chain: 'sepolia', counterparty: COUNTERPARTY },
     'idem-2',
   );
   log('idempotent retry returns same decision (D5)', allowedAgain.decision_id === allowed.decision_id);
@@ -98,7 +98,7 @@ async function main(): Promise<void> {
   // 1.4 Category daily budget: 3 spent, category daily = 10 -> 8 more would exceed -> DENY
   const catDenied = await agentClient.proposeSpend(
     agent.agent_id,
-    { amount: '8.00', currency: 'USDC', category: 'data-purchase', chain: 'base-sepolia', counterparty: COUNTERPARTY },
+    { amount: '8.00', currency: 'USDC', category: 'data-purchase', chain: 'sepolia', counterparty: COUNTERPARTY },
     'idem-3',
   );
   log('category daily budget DENIED (D3)', catDenied.decision === 'deny', catDenied.reason);

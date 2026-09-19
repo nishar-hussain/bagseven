@@ -5,7 +5,15 @@ import { agents, balances, ledgerEntries, reservations, settlements, wallets } f
 import { ApiError, idempotencyOnSend, idempotencyPreHandler, type ServiceDeps } from '@agentos/server';
 import { verifySpendToken } from '@agentos/auth';
 import { emit } from '@agentos/events';
-import { getSigner } from './signer.js';
+import { getSigner, type Signer } from './signer.js';
+
+interface RealSignerWithFund extends Signer {
+  fund: (to: string, token: string, amount: string) => Promise<{ txHash: string; gasTxHash?: string }>;
+}
+
+function isRealSigner(s: Signer): s is RealSignerWithFund {
+  return 'fund' in s;
+}
 
 const provisionWalletSchema = z.object({
   agent_id: z.string().uuid(),
@@ -32,6 +40,23 @@ const COUNTERPARTY_TO_LEDGER_ACCOUNT: Record<string, 'provider' | 'agent' | 'gua
   agent: 'agent',
   guardian: 'guardian',
 };
+
+async function resolvePayee(
+  db: ServiceDeps['db'],
+  counterpartyType: string | null | undefined,
+  counterpartyId: string | null | undefined,
+  chain: string,
+): Promise<string> {
+  if (!counterpartyId) return '0x0000000000000000000000000000000000000000';
+  if (counterpartyType === 'agent') {
+    const payee = await db.query.wallets.findFirst({
+      where: and(eq(wallets.agentId, counterpartyId), eq(wallets.chain, chain)),
+    });
+    if (payee) return payee.address;
+  }
+  // tool/data providers (Phase 2/3) will resolve their registered payout wallet here.
+  return '0x0000000000000000000000000000000000000000';
+}
 
 export function buildTreasuryRoutes(app: FastifyInstance, { db, redis, config }: ServiceDeps): void {
   app.addHook('preHandler', idempotencyPreHandler(redis));
@@ -72,17 +97,28 @@ export function buildTreasuryRoutes(app: FastifyInstance, { db, redis, config }:
   });
 
   app.post('/v1/wallets/:id/credit', async (req) => {
-    // Dev-only faucet for testnet manual testing (slice 1.3 manual test).
+    // Dev faucet. With a real signer this moves actual tokens on-chain from the
+    // master account; with the dev signer it is a pure ledger credit.
     if (config.DEV_MODE !== 'true') throw new ApiError(404, 'NOT_FOUND', 'not found');
     const { id } = req.params as { id: string };
     const body = creditSchema.parse(req.body);
+    const wallet = await db.query.wallets.findFirst({ where: eq(wallets.id, id) });
+    if (!wallet) throw new ApiError(404, 'NOT_FOUND', 'wallet not found');
+
+    const signer = getSigner(wallet.chain);
+    let txHash: string | undefined;
+    if (isRealSigner(signer)) {
+      const funding = await signer.fund(wallet.address, body.token, body.amount);
+      txHash = funding.txHash;
+    }
+
     const [updated] = await db
       .update(balances)
       .set({ amount: sql`amount + ${body.amount}::numeric` })
       .where(and(eq(balances.walletId, id), eq(balances.token, body.token)))
       .returning();
     if (!updated) throw new ApiError(404, 'NOT_FOUND', 'wallet token balance not found');
-    return { balance: updated };
+    return { balance: updated, tx_hash: txHash };
   });
 
   app.get('/v1/wallets/:agentId', async (req) => {
@@ -194,9 +230,10 @@ export function buildTreasuryRoutes(app: FastifyInstance, { db, redis, config }:
     if (!wallet) throw new ApiError(404, 'NOT_FOUND', 'wallet not found');
 
     const signer = getSigner(wallet.chain);
+    const payee = await resolvePayee(db, reservation.counterpartyType, reservation.counterpartyId, wallet.chain);
     const payment = await signer.signAndSubmit({
       agentId: wallet.agentId,
-      to: reservation.counterpartyId ?? '0x0000000000000000000000000000000000000000',
+      to: payee,
       amount: reservation.amount,
       token: reservation.token,
     });
