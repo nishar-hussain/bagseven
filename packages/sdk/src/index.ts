@@ -149,8 +149,86 @@ export class Client {
     }).then((r) => (r as { agent: AgentRecord }).agent) as Promise<AgentRecord>;
   }
 
-  suspendAgent(id: string): Promise<AgentRecord> {
-    return this.request('POST', `/v1/agents/${id}/suspend`) as Promise<AgentRecord>;
+  suspendAgent(id: string, guardianToken: string): Promise<AgentRecord> {
+    return this.request('POST', `/v1/agents/${id}/suspend`, undefined, {
+      headers: { 'x-guardian-token': guardianToken },
+    }).then((r) => (r as { agent: AgentRecord }).agent) as Promise<AgentRecord>;
+  }
+
+  delegateAgent(
+    parentId: string,
+    input: { display_name: string; capabilities?: string[]; delegation_rules?: { max_daily_budget: string; max_transaction: string; allowed_chains?: string[]; allowed_categories?: string[] } },
+    guardianToken: string,
+  ): Promise<{ agent_id: string; api_key: string; signing_private_key_pem: string; status: string; parent_agent_id: string; policy?: { policy_id: string; version: number } }> {
+    return this.request('POST', `/v1/agents/${parentId}/delegate`, input, {
+      headers: { 'x-guardian-token': guardianToken },
+    }) as Promise<{
+      agent_id: string;
+      api_key: string;
+      signing_private_key_pem: string;
+      status: string;
+      parent_agent_id: string;
+      policy?: { policy_id: string; version: number };
+    }>;
+  }
+
+  retireAgent(id: string, guardianToken: string): Promise<AgentRecord> {
+    return this.request('POST', `/v1/agents/${id}/retire`, undefined, {
+      headers: { 'x-guardian-token': guardianToken },
+    }).then((r) => (r as { agent: AgentRecord }).agent) as Promise<AgentRecord>;
+  }
+
+  respondApproval(id: string, status: 'approved' | 'rejected', guardianToken: string): Promise<{
+    status: string;
+    decision: string;
+    decision_id?: string;
+    spend_token?: string;
+    reason?: string;
+  }> {
+    return this.request('POST', `/v1/guardian-approvals/${id}/respond`, { status }, {
+      headers: { 'x-guardian-token': guardianToken },
+    }) as Promise<{
+      status: string;
+      decision: string;
+      decision_id?: string;
+      spend_token?: string;
+      reason?: string;
+    }>;
+  }
+
+  spendSummary(agentId: string): Promise<{
+    agent_id: string;
+    policy_version: number;
+    daily_budget: string;
+    daily_spent: string;
+    monthly_budget: string | null;
+    monthly_spent: string;
+    children_spent: string;
+    categories: Record<string, { limit?: { max_per_tx?: string; daily_budget?: string }; spent: string }>;
+  }> {
+    return this.request('GET', `/v1/agents/${agentId}/spend-summary`) as Promise<{
+      agent_id: string;
+      policy_version: number;
+      daily_budget: string;
+      daily_spent: string;
+      monthly_budget: string | null;
+      monthly_spent: string;
+      children_spent: string;
+      categories: Record<string, { limit?: { max_per_tx?: string; daily_budget?: string }; spent: string }>;
+    }>;
+  }
+
+  sweepWallet(walletId: string, toAddress: string): Promise<{ wallet_id: string; status: string; usdcTxHash?: string; ethTxHash?: string }> {
+    return this.request('POST', `/v1/wallets/${walletId}/sweep`, { to_address: toAddress }) as Promise<{
+      wallet_id: string;
+      status: string;
+      usdcTxHash?: string;
+      ethTxHash?: string;
+    }>;
+  }
+
+  compensate(input: { decision_id: string; agent_id: string; amount: string; category: string; include_monthly?: boolean }): Promise<{ applied: boolean }> {
+    return this.request('POST', '/v1/compensations', { include_monthly: true, ...input }) as Promise<{ applied: boolean }>;
   }
 
   // Policy

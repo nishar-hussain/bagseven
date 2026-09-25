@@ -15,6 +15,13 @@
       "when": 1789780648950,
       "tag": "0001_shallow_warhawk",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1790356386019,
+      "tag": "0002_daffy_thaddeus_ross",
+      "breakpoints": true
     }
   ]
 }

@@ -68,10 +68,19 @@ To point the console at a different gateway: `NEXT_PUBLIC_GATEWAY_URL=https://�
 ## Verify Phase 1 end-to-end
 
 ```bash
-pnpm exec tsx scripts/e2e-phase1.ts
+pnpm exec tsx scripts/e2e-phase1.ts     # full money loop (real signer needs funded master)
+pnpm exec tsx scripts/e2e-phase1b.ts    # delegation · approval→token · suspension gate · summary · compensation
 ```
 
-This runs the full money loop: create org → guardian → agent → guardian confirm → provision wallet → fund → publish policy → over-limit spend **denied** → in-limit spend **allowed + spend_token** → idempotent retry → category-budget denial → reserve → commit → receipt → balance accounting. All checks must print `[PASS]`.
+Both print `[PASS]` per check. `e2e-phase1.ts` runs the core money loop; `e2e-phase1b.ts` covers the remaining Phase-1 features fully off-chain:
+
+- **Delegation** (`POST /v1/agents/:id/delegate`, guardian-authorized): child agent + initial policy created as a **strict subset** of the parent (daily budget < parent nominal AND ≤ parent remaining; max_tx ≤ parent; chains/categories ⊆ parent). Over-budget delegation is rejected at creation (`DELEGATION_SUBSET_VIOLATION`).
+- **Guardian approval → token loop** (`POST /v1/guardian-approvals/:id/respond`): an above-threshold spend is `pending_approval`; the guardian approves → budget is re-checked against the *current* policy → the spend_token is minted. Rejection records `deny`, no token.
+- **Fail-closed suspension**: the gateway refuses to authenticate a non-`active` agent, and the policy engine additionally denies non-active agents — never an ALLOW.
+- **Spend summary** (`GET /v1/agents/:id/spend-summary`): daily/monthly/children spend vs budget + per-category limits.
+- **Budget compensation** (`POST /v1/compensations`): a released/failed reservation decrements the counters that were incremented at token issuance — idempotent per decision, so retries can't double-credit.
+- **Hard platform cap** (`PLATFORM_MAX_TOTAL_SPEND`): atomic check-and-increment on treasury commit limits cumulative real settlement.
+- **Retire + wallet sweep**: `POST /v1/agents/:id/retire` and `POST /v1/wallets/:id/sweep` (real signer transfers the full on-chain USDC + native balance).
 
 ## Tests
 

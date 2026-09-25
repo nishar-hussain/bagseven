@@ -72,6 +72,7 @@ export const guardianApprovals = pgTable(
     agentId: uuid('agent_id')
       .notNull()
       .references(() => agents.id),
+    decisionId: uuid('decision_id'),
     requestedAction: jsonb('requested_action').notNull(),
     status: approvalStatus('status').notNull().default('pending'),
     requestedAt: timestamp('requested_at', { withTimezone: true }).notNull().defaultNow(),

@@ -1,11 +1,21 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { and, eq, sql } from 'drizzle-orm';
-import { agents, balances, ledgerEntries, reservations, settlements, wallets } from '@agentos/db';
+import { agents, balances, ledgerEntries, policyChecks, reservations, settlements, wallets } from '@agentos/db';
+import { toMicroUnits } from '@agentos/money';
 import { ApiError, idempotencyOnSend, idempotencyPreHandler, type ServiceDeps } from '@agentos/server';
 import { verifySpendToken } from '@agentos/auth';
 import { emit } from '@agentos/events';
 import { getSigner, type Signer } from './signer.js';
+
+const CAP_CHECK_AND_INCR_LUA = `
+local current = tonumber(redis.call('GET', KEYS[1]) or '0')
+local amount = tonumber(ARGV[1])
+local cap = tonumber(ARGV[2])
+if cap >= 0 and current + amount > cap then return {0, current} end
+redis.call('INCRBY', KEYS[1], amount)
+return {1, current + amount}
+`;
 
 interface RealSignerWithFund extends Signer {
   fund: (to: string, token: string, amount: string) => Promise<{ txHash: string; gasTxHash?: string }>;
@@ -231,12 +241,38 @@ export function buildTreasuryRoutes(app: FastifyInstance, { db, redis, config }:
 
     const signer = getSigner(wallet.chain);
     const payee = await resolvePayee(db, reservation.counterpartyType, reservation.counterpartyId, wallet.chain);
-    const payment = await signer.signAndSubmit({
-      agentId: wallet.agentId,
-      to: payee,
-      amount: reservation.amount,
-      token: reservation.token,
-    });
+
+    // Slice 1.6: hard platform-level spending cap (guarded signing). Atomic
+    // check-and-increment so concurrent commits can't jointly exceed it.
+    const capStr = config.PLATFORM_MAX_TOTAL_SPEND;
+    let capExceeded = false;
+    if (capStr) {
+      const [ok] = (await redis.eval(
+        CAP_CHECK_AND_INCR_LUA,
+        1,
+        'platform:committed_spend',
+        toMicroUnits(reservation.amount),
+        toMicroUnits(capStr),
+      )) as [number, number];
+      capExceeded = ok !== 1;
+    }
+    if (capExceeded) {
+      throw new ApiError(403, 'PLATFORM_CAP_EXCEEDED', `platform total-spend cap ${capStr} exceeded`);
+    }
+
+    let payment;
+    try {
+      payment = await signer.signAndSubmit({
+        agentId: wallet.agentId,
+        to: payee,
+        amount: reservation.amount,
+        token: reservation.token,
+      });
+    } catch (err) {
+      // Roll back the platform-cap counter — the settlement did not happen.
+      if (capStr) await redis.decrby('platform:committed_spend', Number(toMicroUnits(reservation.amount)));
+      throw err;
+    }
 
     let settlementId: string | undefined;
     await db.transaction(async (tx) => {
@@ -339,6 +375,8 @@ export function buildTreasuryRoutes(app: FastifyInstance, { db, redis, config }:
     if (!reservation) throw new ApiError(404, 'NOT_FOUND', 'reservation not found');
     if (reservation.status !== 'held') throw new ApiError(409, 'INVALID_STATE', `reservation is ${reservation.status}`);
 
+    const wallet = await db.query.wallets.findFirst({ where: eq(wallets.id, reservation.walletId) });
+
     await db.transaction(async (tx) => {
       await tx.update(reservations).set({ status: 'released' }).where(eq(reservations.id, id));
       await tx
@@ -348,6 +386,51 @@ export function buildTreasuryRoutes(app: FastifyInstance, { db, redis, config }:
     });
 
     await emit(db, 'treasury.reservation.released', reservation.id, { reservation_id: id, reason: 'released_by_caller' });
+
+    // D1: the budget counter was incremented at token issuance — release compensates it.
+    const policyUrl = config.POLICY_URL;
+    if (policyUrl && wallet) {
+      try {
+        const pc = await db.query.policyChecks.findFirst({ where: eq(policyChecks.decisionId, reservation.policyDecisionId) });
+        const action = pc?.requestedAction as { category?: string } | undefined;
+        await fetch(`${policyUrl}/v1/compensations`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            decision_id: reservation.policyDecisionId,
+            agent_id: wallet.agentId,
+            amount: reservation.amount,
+            category: action?.category ?? 'general',
+          }),
+        });
+      } catch (err) {
+        app.log.warn({ err }, 'budget compensation call failed (idempotent — safe to retry)');
+      }
+    }
+
     return { reservation_id: id, status: 'released' };
+  });
+
+  // Lifecycle: sweep an agent's full on-chain balance to a target address (used on retire).
+  app.post('/v1/wallets/:id/sweep', async (req) => {
+    const { id } = req.params as { id: string };
+    const body = z.object({ to_address: z.string().regex(/^0x[0-9a-fA-F]{40}$/) }).parse(req.body);
+    const wallet = await db.query.wallets.findFirst({ where: eq(wallets.id, id) });
+    if (!wallet) throw new ApiError(404, 'NOT_FOUND', 'wallet not found');
+    if (wallet.status === 'swept') throw new ApiError(409, 'INVALID_STATE', 'wallet already swept');
+
+    const signer = getSigner(wallet.chain);
+    const result = await signer.sweep(wallet.agentId, body.to_address);
+
+    await db.transaction(async (tx) => {
+      await tx.update(wallets).set({ status: 'swept' }).where(eq(wallets.id, id));
+      await tx
+        .update(balances)
+        .set({ amount: '0', reservedAmount: '0' })
+        .where(eq(balances.walletId, id));
+    });
+
+    await emit(db, 'treasury.reservation.released', wallet.agentId, { wallet_id: id, reason: 'wallet_swept' });
+    return { wallet_id: id, status: 'swept', ...result };
   });
 }

@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { and, eq } from 'drizzle-orm';
+import { randomUUID } from 'node:crypto';
 import { agents, agentCapabilities, guardians, organizations } from '@agentos/db';
 import { createAgentKeyPair, hashApiKey } from '@agentos/auth';
 import { emit } from '@agentos/events';
@@ -17,6 +18,19 @@ const createGuardianSchema = z.object({
   approval_webhook_url: z.string().url().optional(),
 });
 
+const delegateSchema = z.object({
+  display_name: z.string().min(1),
+  capabilities: z.array(z.string()).optional(),
+  delegation_rules: z
+    .object({
+      max_daily_budget: z.string().min(1),
+      max_transaction: z.string().min(1),
+      allowed_chains: z.array(z.string()).optional(),
+      allowed_categories: z.array(z.string()).optional(),
+    })
+    .optional(),
+});
+
 const createAgentSchema = z.object({
   owner_org_id: z.string().uuid(),
   guardian_id: z.string().uuid(),
@@ -24,7 +38,7 @@ const createAgentSchema = z.object({
   capabilities: z.array(z.string()).optional(),
 });
 
-export function buildIdentityRoutes(app: FastifyInstance, { db }: ServiceDeps): void {
+export function buildIdentityRoutes(app: FastifyInstance, { db, config }: ServiceDeps): void {
   app.get('/v1/organizations/:id', async (req) => {
     const { id } = req.params as { id: string };
     const org = await db.query.organizations.findFirst({ where: eq(organizations.id, id) });
@@ -152,6 +166,95 @@ export function buildIdentityRoutes(app: FastifyInstance, { db }: ServiceDeps): 
       agent_id: id,
       old_status: 'active',
       new_status: 'suspended',
+    });
+    return { agent: toAgentDto(updated!) };
+  });
+
+  // Slice 1.7: create a delegated child agent. The child's budget is a STRICT SUBSET
+  // of the parent's — enforced here as a pre-check and authoritatively at child-policy
+  // creation by the policy service (POST /v1/policies).
+  app.post('/v1/agents/:id/delegate', async (req) => {
+    const { id } = req.params as { id: string };
+    const token = (req.headers['x-guardian-token'] as string | undefined) ?? '';
+    const { agent: parent } = await requireGuardian(id, token);
+    if (parent.status !== 'active') throw new ApiError(409, 'INVALID_STATUS', 'parent agent is not active');
+
+    const body = delegateSchema.parse(req.body);
+    const keyPair = createAgentKeyPair();
+    const childId = randomUUID();
+
+    await db.transaction(async (tx) => {
+      await tx.insert(agents).values({
+        id: childId,
+        ownerOrgId: parent.ownerOrgId,
+        guardianId: parent.guardianId,
+        parentAgentId: id,
+        displayName: body.display_name,
+        status: 'active',
+        apiKeyHash: keyPair.apiKeyHash,
+        publicKeyPem: keyPair.publicKeyPem,
+      });
+      for (const capability of body.capabilities ?? []) {
+        await tx.insert(agentCapabilities).values({ agentId: childId, capability });
+      }
+      await emit(tx, 'identity.agent.created', childId, {
+        agent_id: childId,
+        owner_org_id: parent.ownerOrgId,
+        guardian_id: parent.guardianId,
+        parent_agent_id: id,
+      });
+    });
+
+    // Create the child's initial policy via the policy service so the strict-subset
+    // rule is enforced in one place. Roll back the child agent if it's rejected.
+    let policy: { policy_id: string; version: number } | undefined;
+    const policyUrl = config.POLICY_URL;
+    if (policyUrl && body.delegation_rules) {
+      const res = await fetch(`${policyUrl}/v1/policies`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          agent_id: childId,
+          daily_budget: body.delegation_rules.max_daily_budget,
+          max_transaction: body.delegation_rules.max_transaction,
+          allowed_chains: body.delegation_rules.allowed_chains ?? [],
+          allowed_categories: body.delegation_rules.allowed_categories ?? [],
+          created_by: 'delegate',
+        }),
+      });
+      const parsed = (await res.json()) as { policy_id?: string; version?: number; error?: { message?: string } };
+      if (!res.ok) {
+        await db.delete(agents).where(eq(agents.id, childId));
+        throw new ApiError(400, 'DELEGATION_SUBSET_VIOLATION', parsed?.error?.message ?? 'child policy rejected');
+      }
+      policy = { policy_id: parsed.policy_id!, version: parsed.version! };
+    }
+
+    return {
+      agent_id: childId,
+      api_key: keyPair.apiKey,
+      signing_private_key_pem: keyPair.privateKeyPem,
+      status: 'active',
+      parent_agent_id: id,
+      policy,
+    };
+  });
+
+  // Lifecycle terminal state: retired agents can never spend again.
+  app.post('/v1/agents/:id/retire', async (req) => {
+    const { id } = req.params as { id: string };
+    const token = (req.headers['x-guardian-token'] as string | undefined) ?? '';
+    const { agent } = await requireGuardian(id, token);
+    if (agent.status === 'retired') throw new ApiError(409, 'INVALID_STATUS', 'agent already retired');
+    const [updated] = await db
+      .update(agents)
+      .set({ status: 'retired', updatedAt: new Date() })
+      .where(eq(agents.id, id))
+      .returning();
+    await emit(db, 'identity.agent.status_changed', id, {
+      agent_id: id,
+      old_status: agent.status,
+      new_status: 'retired',
     });
     return { agent: toAgentDto(updated!) };
   });

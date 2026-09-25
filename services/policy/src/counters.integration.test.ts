@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { Redis } from 'ioredis';
 import { checkAndIncrement } from './counters.js';
+import { compensate } from './compensate.js';
 import { runConcurrently } from '@agentos/testing';
 
 /**
@@ -106,6 +107,74 @@ describe('budget check-and-increment concurrency', () => {
 
     const allowed = results.filter((r) => r.allowed).length;
     expect(allowed).toBe(2); // 2 * 4 = 8 <= 10, third would be 12 > 10
+    await flush();
+  });
+
+  it('compensation restores budget after a failed settlement (D1), idempotently', async () => {
+    try {
+      await redis.connect();
+    } catch {
+      return;
+    }
+    await flush();
+
+    const agent = 'agt_comp';
+    const first = await checkAndIncrement(redis, {
+      agentId: agent,
+      amount: '30.00',
+      dailyBudget: '100.00',
+      monthlyBudget: null,
+      categoryDailyLimit: null,
+      category: 'general',
+      ancestors: [],
+    });
+    expect(first.allowed).toBe(true);
+
+    // Second spend would exceed the remaining 70? No — 30 + 30 = 60 <= 100, allowed.
+    const second = await checkAndIncrement(redis, {
+      agentId: agent,
+      amount: '30.00',
+      dailyBudget: '100.00',
+      monthlyBudget: null,
+      categoryDailyLimit: null,
+      category: 'general',
+      ancestors: [],
+    });
+    expect(second.allowed).toBe(true);
+
+    // Release/refund the first decision → counter returns to 30.
+    const comp = await compensate(redis, {
+      decisionId: '11111111-1111-4111-8111-111111111111',
+      agentId: agent,
+      amount: '30.00',
+      category: 'general',
+      includeMonthly: false,
+      ancestors: [],
+    });
+    expect(comp.applied).toBe(true);
+
+    // 30 remains consumed; a $70 spend is now allowed, $80 is not.
+    const after = await checkAndIncrement(redis, {
+      agentId: agent,
+      amount: '70.00',
+      dailyBudget: '100.00',
+      monthlyBudget: null,
+      categoryDailyLimit: null,
+      category: 'general',
+      ancestors: [],
+    });
+    expect(after.allowed).toBe(true);
+
+    // Idempotency: a second compensation for the same decision is a no-op.
+    const again = await compensate(redis, {
+      decisionId: '11111111-1111-4111-8111-111111111111',
+      agentId: agent,
+      amount: '30.00',
+      category: 'general',
+      includeMonthly: false,
+      ancestors: [],
+    });
+    expect(again.applied).toBe(false);
     await flush();
   });
 });

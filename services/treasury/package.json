@@ -23,6 +23,7 @@
     "@agentos/auth": "workspace:*",
     "@agentos/db": "workspace:*",
     "@agentos/events": "workspace:*",
+    "@agentos/money": "workspace:*",
     "@agentos/server": "workspace:*",
     "drizzle-orm": "^0.45.2",
     "fastify": "^5.12.5",

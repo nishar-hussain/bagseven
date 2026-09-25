@@ -12,6 +12,8 @@ interface Upstream {
 
 function upstreamFor(path: string, cfg: NodeJS.ProcessEnv): Upstream {
   const u = (env: string) => ({ baseUrl: cfg[env] ?? '' });
+  if (path.includes('/spend-summary')) return u('POLICY_URL');
+  if (path.startsWith('/v1/guardian-approvals') || path.startsWith('/v1/compensations')) return u('POLICY_URL');
   if (path.startsWith('/v1/agents') && path.includes('/receipts')) return u('VERIFICATION_URL');
   if (path.startsWith('/v1/agents') || path.startsWith('/v1/organizations') || path.startsWith('/v1/guardians')) return u('IDENTITY_URL');
   if (path.startsWith('/v1/policies') || path.startsWith('/v1/spend-intents') || path.startsWith('/v1/policy-checks')) return u('POLICY_URL');
@@ -47,7 +49,7 @@ async function proxy(req: FastifyRequest, reply: FastifyReply, cfg: NodeJS.Proce
   return payload;
 }
 
-const BOOTSTRAP_PREFIXES = ['/healthz', '/v1/organizations', '/v1/guardians', '/v1/agents'];
+const BOOTSTRAP_PREFIXES = ['/healthz', '/v1/organizations', '/v1/guardians', '/v1/agents', '/v1/guardian-approvals'];
 
 export function buildGatewayRoutes(app: FastifyInstance, { db, redis, config }: { db: ReturnType<typeof createDb>; redis: Redis; config: NodeJS.ProcessEnv }): void {
   void app.register(cors, {

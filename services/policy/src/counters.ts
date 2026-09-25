@@ -1,4 +1,5 @@
 import type { Redis } from 'ioredis';
+import { fromMicroUnits, toMicroUnits } from '@agentos/money';
 
 /**
  * Atomic budget check-and-increment (D2, D3). The Lua script re-checks every
@@ -15,24 +16,6 @@ import type { Redis } from 'ioredis';
  * Ancestor counters: spend:d:{anc}:{YYYY-MM-DD}    (ancestor own spend)
  *                    spend:child:{anc}:{YYYY-MM-DD} (aggregate descendant spend)
  */
-
-const SCALE = 1_000_000n;
-
-/** "3.5" -> "3500000"; "0.000001" -> "1". Precise — no floating point. */
-export function toMicroUnits(amount: string): string {
-  const [int = '0', frac = ''] = amount.split('.');
-  const fracPadded = `${frac}000000`.slice(0, 6);
-  const units = BigInt(int) * SCALE + BigInt(fracPadded);
-  return units.toString();
-}
-
-/** "3500000" -> "3.5"; "3" -> "3". */
-export function fromMicroUnits(units: string): string {
-  const u = BigInt(units);
-  const int = u / SCALE;
-  const frac = (u % SCALE).toString().padStart(6, '0').replace(/0+$/, '');
-  return frac ? `${int}.${frac}` : `${int}`;
-}
 
 const CHECK_AND_INCREMENT_LUA = `
 local amount = tonumber(ARGV[1])
@@ -141,4 +124,32 @@ export async function currentSpend(redis: Redis, agentId: string, category: stri
   const daily = (await redis.get(`spend:d:${agentId}:${d}`)) ?? '0';
   const cat = (await redis.get(`spend:c:${agentId}:${d}:${category}`)) ?? '0';
   return { daily: fromMicroUnits(daily), category: fromMicroUnits(cat) };
+}
+
+export async function currentMonthly(redis: Redis, agentId: string): Promise<string> {
+  const m = monthKey();
+  const monthly = (await redis.get(`spend:m:${agentId}:${m}`)) ?? '0';
+  return fromMicroUnits(monthly);
+}
+
+export async function currentCategory(redis: Redis, agentId: string, category: string): Promise<string> {
+  const d = dayKey();
+  const cat = (await redis.get(`spend:c:${agentId}:${d}:${category}`)) ?? '0';
+  return fromMicroUnits(cat);
+}
+
+export async function currentChildrenSpent(redis: Redis, agentId: string): Promise<string> {
+  const d = dayKey();
+  const children = (await redis.get(`spend:child:${agentId}:${d}`)) ?? '0';
+  return fromMicroUnits(children);
+}
+
+/** Parent's live remaining budget = dailyBudget − own daily spend − all descendants' spend. */
+export async function parentRemaining(redis: Redis, parentAgentId: string, dailyBudget: string): Promise<string> {
+  const d = dayKey();
+  const own = (await redis.get(`spend:d:${parentAgentId}:${d}`)) ?? '0';
+  const children = (await redis.get(`spend:child:${parentAgentId}:${d}`)) ?? '0';
+  const remaining = BigInt(toMicroUnits(dailyBudget)) - BigInt(own) - BigInt(children);
+  if (remaining < 0n) return '0';
+  return fromMicroUnits(remaining.toString());
 }

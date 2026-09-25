@@ -243,6 +243,9 @@ importers:
       '@agentos/events':
         specifier: workspace:*
         version: link:../../packages/events
+      '@agentos/money':
+        specifier: workspace:*
+        version: link:../../packages/money
       '@agentos/server':
         specifier: workspace:*
         version: link:../../packages/server

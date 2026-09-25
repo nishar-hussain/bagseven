@@ -26,6 +26,8 @@ export interface Signer {
     txHash: string;
     confirmed: boolean;
   }>;
+  /** Transfer the agent's full on-chain balance (USDC + native) to a target address. */
+  sweep(agentId: string, to: string): Promise<{ usdcTxHash?: string; ethTxHash?: string }>;
 }
 
 export class DevSigner implements Signer {
@@ -49,6 +51,10 @@ export class DevSigner implements Signer {
       .update(JSON.stringify({ agentId: input.agentId, to: input.to, amount: input.amount, token: input.token, nonce: Date.now() }))
       .digest('hex');
     return { txHash: `0x${hash}`, confirmed: true };
+  }
+
+  async sweep(agentId: string, to: string): Promise<{ usdcTxHash?: string; ethTxHash?: string }> {
+    return { usdcTxHash: `0x${createHash('sha256').update(`sweep:${agentId}:${to}:${Date.now()}`).digest('hex')}` };
   }
 }
 
@@ -160,6 +166,43 @@ export class RealEoaSigner implements Signer {
     await this.publicClient.waitForTransactionReceipt({ hash: gasTxHash });
 
     return { txHash, gasTxHash };
+  }
+
+  /** Sweeps the agent's full on-chain USDC + native balance to a target address. */
+  async sweep(agentId: string, to: string): Promise<{ usdcTxHash?: string; ethTxHash?: string }> {
+    const account = this.agentAccount(agentId);
+    const wallet = createWalletClient({ account, chain: this.spec.viemChain, transport: http(this.spec.rpcUrl) });
+    const result: { usdcTxHash?: string; ethTxHash?: string } = {};
+
+    const usdcBal = (await this.publicClient.readContract({
+      address: this.spec.usdcAddress,
+      abi: erc20Abi,
+      functionName: 'balanceOf',
+      args: [account.address],
+    })) as bigint;
+    if (usdcBal > 0n) {
+      const usdcTx: Hex = await wallet.writeContract({
+        address: this.spec.usdcAddress,
+        abi: erc20Abi,
+        functionName: 'transfer',
+        args: [to as Address, usdcBal],
+      });
+      result.usdcTxHash = usdcTx;
+      await this.publicClient.waitForTransactionReceipt({ hash: usdcTx });
+    }
+
+    const ethBal = await this.publicClient.getBalance({ address: account.address });
+    if (ethBal > 0n) {
+      const gasEstimate = 21_000n * (await this.publicClient.getGasPrice());
+      const value = ethBal > gasEstimate ? ethBal - gasEstimate : 0n;
+      if (value > 0n) {
+        const ethTx: Hex = await wallet.sendTransaction({ to: to as Address, value });
+        result.ethTxHash = ethTx;
+        await this.publicClient.waitForTransactionReceipt({ hash: ethTx });
+      }
+    }
+
+    return result;
   }
 }
 

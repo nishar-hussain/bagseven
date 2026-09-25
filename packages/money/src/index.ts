@@ -76,3 +76,21 @@ export function clamp(a: string, lo: string, hi: string): string {
 }
 
 export const ZERO = '0';
+
+/**
+ * Exact conversion between decimal-money strings and integer micro-units (1e-6),
+ * used for Redis counters / on-chain USDC (6 decimals). Never uses floating point.
+ */
+export function toMicroUnits(amount: string): string {
+  const [int = '0', frac = ''] = amount.split('.');
+  const fracPadded = `${frac}000000`.slice(0, 6);
+  const units = BigInt(int) * 1_000_000n + BigInt(fracPadded);
+  return units.toString();
+}
+
+export function fromMicroUnits(units: string): string {
+  const u = BigInt(units);
+  const int = u / 1_000_000n;
+  const frac = (u % 1_000_000n).toString().padStart(6, '0').replace(/0+$/, '');
+  return frac ? `${int}.${frac}` : `${int}`;
+}
