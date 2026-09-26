@@ -371,17 +371,28 @@ export function StepSettle(props: StepProps) {
 
   const doReserveAndCommit = async (token: string, decision: Session['lastDecision'] & { counterparty_id: string; amount: string }) => {
     if (!session.walletId) throw new Error('provision a wallet first (step 2)');
-    const res = await client.reserve(
-      {
-        wallet_id: session.walletId,
-        token: 'USDC',
-        amount: decision.amount,
-        spend_token: token,
-        counterparty_id: decision.counterparty_id,
-        counterparty_type: cpType,
-      },
-      `reserve-${Date.now()}`,
-    );
+    let res: { reservation_id: string };
+    try {
+      res = await client.reserve(
+        {
+          wallet_id: session.walletId,
+          token: 'USDC',
+          amount: decision.amount,
+          spend_token: token,
+          counterparty_id: decision.counterparty_id,
+          counterparty_type: cpType,
+        },
+        `reserve-${Date.now()}`,
+      );
+    } catch (err) {
+      if ((err as { code?: string }).code === 'INSUFFICIENT_FUNDS') {
+        throw new Error(
+          `Wallet has insufficient USDC — fund it in Step 2 (Credit) before settling. (available: ${session.balances.find((b) => b.token === 'USDC')?.amount ?? 0})`,
+          { cause: err },
+        );
+      }
+      throw err;
+    }
     // Token is single-use: consume it immediately so the button can't reuse it.
     const consumed: Session = { ...session, lastDecision: { ...decision, spend_token: undefined } };
     const commit = await client.commitReservation(res.reservation_id);
