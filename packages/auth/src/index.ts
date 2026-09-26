@@ -146,6 +146,20 @@ export function newJti(): string {
   return randomBytes(16).toString('hex');
 }
 
+/**
+ * Decodes a spend token's claims WITHOUT verifying the signature. Used only to
+ * read claims from an expired token (e.g. to release its budget reservation).
+ * Never use this for authorization — always verifySpendToken for that.
+ */
+export function peekSpendTokenClaims(token: string): SpendTokenClaims {
+  if (!token.startsWith(TOKEN_PREFIX)) throw new Error('invalid token format');
+  const rest = token.slice(TOKEN_PREFIX.length);
+  const dot = rest.indexOf('.');
+  if (dot < 0) throw new Error('invalid token format');
+  const payload = Buffer.from(rest.slice(0, dot), 'base64url');
+  return JSON.parse(payload.toString('utf8')) as SpendTokenClaims;
+}
+
 export function generateSigningKeypair(): SigningKeypair {
   const { publicKey, privateKey } = generateKeyPairSync('ed25519');
   return {

@@ -4,7 +4,7 @@ import { and, eq, sql } from 'drizzle-orm';
 import { agents, balances, ledgerEntries, policyChecks, reservations, settlements, wallets } from '@agentos/db';
 import { toMicroUnits } from '@agentos/money';
 import { ApiError, idempotencyOnSend, idempotencyPreHandler, type ServiceDeps } from '@agentos/server';
-import { verifySpendToken } from '@agentos/auth';
+import { peekSpendTokenClaims, verifySpendToken } from '@agentos/auth';
 import { emit } from '@agentos/events';
 import { getSigner, type Signer } from './signer.js';
 
@@ -166,7 +166,31 @@ export function buildTreasuryRoutes(app: FastifyInstance, { db, redis, config }:
     try {
       claims = verifySpendToken(body.spend_token, policyPublicKey);
     } catch (err) {
-      throw new ApiError(403, 'INVALID_SPEND_TOKEN', (err as Error).message);
+      const msg = (err as Error).message;
+      if (msg === 'token expired') {
+        // Release the abandoned decision's budget so a re-proposed spend isn't
+        // double-counted, and tell the client to mint a fresh token.
+        try {
+          const peeked = peekSpendTokenClaims(body.spend_token);
+          const policyUrl = config.POLICY_URL;
+          if (policyUrl) {
+            await fetch(`${policyUrl}/v1/compensations`, {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({
+                decision_id: peeked.decision_id,
+                agent_id: peeked.agent_id,
+                amount: peeked.amount,
+                category: peeked.category,
+              }),
+            });
+          }
+        } catch (compErr) {
+          app.log.warn({ err: compErr }, 'expired-token compensation failed (idempotent — safe to retry)');
+        }
+        throw new ApiError(403, 'SPEND_TOKEN_EXPIRED', 'spend token expired — create a fresh spend intent');
+      }
+      throw new ApiError(403, 'INVALID_SPEND_TOKEN', msg);
     }
 
     if (claims.agent_id !== wallet.agentId) throw new ApiError(403, 'TOKEN_AGENT_MISMATCH', 'token agent does not match wallet');

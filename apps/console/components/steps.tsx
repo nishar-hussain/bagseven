@@ -369,36 +369,67 @@ export function StepSettle(props: StepProps) {
   const refresh = (s: Session) =>
     client.getWallet(s.agentId).then((w) => ({ ...s, balances: w.wallets[0]?.balances ?? [] }));
 
+  const doReserveAndCommit = async (token: string, decision: Session['lastDecision'] & { counterparty_id: string; amount: string }) => {
+    if (!session.walletId) throw new Error('provision a wallet first (step 2)');
+    const res = await client.reserve(
+      {
+        wallet_id: session.walletId,
+        token: 'USDC',
+        amount: decision.amount,
+        spend_token: token,
+        counterparty_id: decision.counterparty_id,
+        counterparty_type: cpType,
+      },
+      `reserve-${Date.now()}`,
+    );
+    // Token is single-use: consume it immediately so the button can't reuse it.
+    const consumed: Session = { ...session, lastDecision: { ...decision, spend_token: undefined } };
+    const commit = await client.commitReservation(res.reservation_id);
+    const receipts = await client.getAgentReceipts(session.agentId);
+    const next = {
+      ...consumed,
+      reservationId: res.reservation_id,
+      txHash: commit.tx_hash,
+      receiptId: receipts.receipts[0]?.id,
+    };
+    persist(await refresh(next));
+    toast('ok', `Settled ${decision.amount} USDC — tx ${commit.tx_hash.slice(0, 12)}…`);
+  };
+
   const settle = () =>
     run('reserve + commit', async () => {
-      if (!session.lastDecision?.spend_token) throw new Error('get an allow decision first (step 4)');
-      if (!session.walletId) throw new Error('provision a wallet first (step 2)');
-      const token = session.lastDecision.spend_token;
-      // The token is bound to this exact counterparty — reuse it, never mint a new one.
-      const counterpartyId = session.lastDecision.counterparty_id;
-      const res = await client.reserve(
-        {
-          wallet_id: session.walletId,
-          token: 'USDC',
-          amount: session.lastDecision.amount,
-          spend_token: token,
-          counterparty_id: counterpartyId,
-          counterparty_type: cpType,
-        },
-        `reserve-${Date.now()}`,
-      );
-      // Token is single-use: consume it immediately so the button can't reuse it.
-      const consumed: Session = { ...session, lastDecision: { ...session.lastDecision, spend_token: undefined } };
-      const commit = await client.commitReservation(res.reservation_id);
-      const receipts = await client.getAgentReceipts(session.agentId);
-      const next = {
-        ...consumed,
-        reservationId: res.reservation_id,
-        txHash: commit.tx_hash,
-        receiptId: receipts.receipts[0]?.id,
-      };
-      persist(await refresh(next));
-      toast('ok', `Settled ${session.lastDecision.amount} USDC — tx ${commit.tx_hash.slice(0, 12)}…`);
+      const decision = session.lastDecision;
+      if (!decision?.spend_token) throw new Error('get an allow decision first (step 4)');
+      if (!decision.counterparty_id) throw new Error('the allow decision is missing its counterparty — re-propose in step 4');
+      try {
+        await doReserveAndCommit(decision.spend_token, decision);
+      } catch (err) {
+        const code = (err as { code?: string }).code;
+        if (code !== 'SPEND_TOKEN_EXPIRED') throw err;
+        // The 30s token expired — seamlessly mint a fresh one for the SAME intent,
+        // then retry. The expired token's budget was already released by the treasury.
+        toast('info', 'Token expired — refreshing…');
+        const fresh = await client.spendIntent(
+          {
+            agent_id: session.agentId,
+            amount: decision.amount,
+            currency: 'USDC',
+            category: decision.category,
+            chain: decision.chain,
+            counterparty_id: decision.counterparty_id,
+          },
+          `refresh-${Date.now()}`,
+        );
+        if (fresh.decision !== 'allow' || !fresh.spend_token) {
+          throw new Error(`re-proposal denied: ${fresh.reason ?? fresh.decision}`, { cause: err });
+        }
+        const refreshed: Session = {
+          ...session,
+          lastDecision: { ...decision, decision_id: fresh.decision_id, spend_token: fresh.spend_token, idemKey: `refresh-${Date.now()}` },
+        };
+        persist(refreshed);
+        await doReserveAndCommit(fresh.spend_token, refreshed.lastDecision as Session['lastDecision'] & { counterparty_id: string; amount: string });
+      }
     });
 
   return (
@@ -408,8 +439,8 @@ export function StepSettle(props: StepProps) {
         settles: debit payer → credit payee → hash-chained receipt.
       </p>
       <p className="section-hint" style={{ marginTop: -8 }}>
-        <span className="pill warn">single-use · 30s expiry</span> If the token expired (you waited too long), create a
-        fresh allow decision in step 4 and come back.
+        <span className="pill warn">single-use · 30s expiry</span> If the token expired while you read this, the
+        console mints a fresh one automatically and retries.
       </p>
       <Field label="Counterparty type">
         <Select value={cpType} onChange={(e) => setCpType(e.target.value as 'agent')}>
