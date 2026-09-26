@@ -3,7 +3,7 @@ import { and, eq, lt, sql } from 'drizzle-orm';
 import { Redis } from 'ioredis';
 import { createService, sweepStuckIdempotency } from '@agentos/server';
 import { buildTreasuryRoutes } from './routes.js';
-import { registerDevSigner, registerRealSigner } from './signer.js';
+import { registerDevSigner, registerRealSigner, SIGNERS } from './signer.js';
 import { loadChainSpecs } from './chains.js';
 
 function registerSigners(): void {
@@ -21,6 +21,13 @@ function registerSigners(): void {
   } else {
     const chains = (process.env.SUPPORTED_CHAINS ?? 'sepolia').split(',');
     for (const chain of chains) registerDevSigner(chain.trim());
+  }
+
+  // Legacy compat: wallets provisioned before the base-sepolia → sepolia rename.
+  // A dev signer keeps them functional (simulated) instead of returning a 500.
+  if (!SIGNERS['base-sepolia']) {
+    registerDevSigner('base-sepolia');
+    console.warn('[treasury] legacy base-sepolia signer registered (dev fallback) — create agents on "sepolia" for real settlement');
   }
 }
 
