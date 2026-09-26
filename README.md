@@ -133,6 +133,22 @@ pnpm exec tsx scripts/e2e-real.ts
 
 `scripts/e2e-real.ts` proves the full flow with real transactions: two agents get real addresses, A is funded 100 USDC on-chain, A commits a $3 payment to B, and the token contract itself shows A=97 / B=3 USDC.
 
+### Local faucet (no external testnet faucets needed)
+
+For local testing, run the whole platform against a local Anvil chain with a
+built-in faucet (10,000 ETH + 1,000,000 USDC on the master account) — real EOAs,
+real local transactions, zero faucet visits:
+
+```bash
+node scripts/setup-local.mjs     # start Anvil + deploy mock USDC + point .env at it
+pkill -f "dist/index.js"; for s in gateway identity treasury policy verification; do pnpm --filter "@agentos/$s" start & done
+E2E_CREDIT=10 E2E_SPEND=3 pnpm exec tsx scripts/e2e-real.ts   # full real-local E2E
+```
+
+Funding in the console then runs real local transactions against the local master
+faucet. To go back to real Sepolia, set `SIGNER_MODE=real` with your funded key +
+`SEPOLIA_RPC_URL`, or `SIGNER_MODE=dev` for purely simulated settlement.
+
 ### Test on real Ethereum Sepolia
 
 1. Create a wallet for the master account and fund it with testnet ETH + USDC:
