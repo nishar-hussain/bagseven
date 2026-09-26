@@ -118,8 +118,14 @@ export function buildTreasuryRoutes(app: FastifyInstance, { db, redis, config }:
     const signer = getSigner(wallet.chain);
     let txHash: string | undefined;
     if (isRealSigner(signer)) {
-      const funding = await signer.fund(wallet.address, body.token, body.amount);
-      txHash = funding.txHash;
+      try {
+        const funding = await signer.fund(wallet.address, body.token, body.amount);
+        txHash = funding.txHash;
+      } catch (err) {
+        // On-chain funding failures (e.g. empty master balance) are a client-side
+        // resource problem, not a server fault — surface a clear 4xx, not a 500.
+        throw new ApiError(402, 'FUNDING_FAILED', `funding failed on-chain: ${(err as Error).message}`);
+      }
     }
 
     const [updated] = await db
@@ -271,7 +277,7 @@ export function buildTreasuryRoutes(app: FastifyInstance, { db, redis, config }:
     } catch (err) {
       // Roll back the platform-cap counter — the settlement did not happen.
       if (capStr) await redis.decrby('platform:committed_spend', Number(toMicroUnits(reservation.amount)));
-      throw err;
+      throw new ApiError(402, 'SETTLEMENT_FAILED', `settlement failed on-chain: ${(err as Error).message}`);
     }
 
     let settlementId: string | undefined;
