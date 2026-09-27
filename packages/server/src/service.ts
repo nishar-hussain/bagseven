@@ -27,7 +27,14 @@ export async function createService(opts: CreateServiceOptions): Promise<Fastify
 
   app.setErrorHandler((err, _req, reply) => {
     const { status, body } = errorResponse(err);
-    if (status >= 500) app.log.error(err);
+    if (status >= 500) {
+      app.log.error(err);
+    } else if (status >= 400) {
+      app.log.warn(
+        { status, code: (body as { error?: { code?: string } })?.error?.code, message: (body as { error?: { message?: string } })?.error?.message },
+        'request rejected',
+      );
+    }
     reply.code(status).send(body);
   });
 

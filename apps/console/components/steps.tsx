@@ -569,6 +569,9 @@ export function StepSettle(props: StepProps) {
       }
     });
 
+  const hasValidPayee =
+    !!session.payeeAgent && !!session.lastDecision && session.lastDecision.counterparty_id === session.payeeAgent.id;
+
   return (
     <Card title="Reserve & settle" action={<AgentBar session={session} />}>
       <p className="section-hint">
@@ -590,14 +593,20 @@ export function StepSettle(props: StepProps) {
         </CodeBlock>
       ) : (
         <p className="section-hint">
-          The payment goes to a real agent&apos;s wallet — not a random id. Create a payee, then in <b>Step 4</b> propose
-          the spend to its id (it&apos;s pre-filled), then settle here.
+          The payment must go to a real agent&apos;s wallet — not a random id. Create a payee below, then in <b>Step
+          4</b> propose the spend to its id (it&apos;s pre-filled), then settle here.
         </p>
       )}
       {!session.payeeAgent && (
         <Button variant="ghost" disabled={busy !== null} onClick={createPayee}>
           {busy ? 'Working…' : 'Create a payee agent'}
         </Button>
+      )}
+      {session.payeeAgent && !hasValidPayee && (
+        <p className="section-hint">
+          <span className="pill warn">re-propose needed</span> Your last spend intent was not made to the payee — go to{' '}
+          <b>Step 4</b>, click <b>Propose</b> (the payee id is pre-filled), then return here.
+        </p>
       )}
       <div className="divider" />
 
@@ -608,9 +617,15 @@ export function StepSettle(props: StepProps) {
           <option value="data_provider">data_provider</option>
         </Select>
       </Field>
-      <Button disabled={busy !== null || !session.lastDecision?.spend_token} onClick={settle}>
+      <Button disabled={busy !== null || !session.lastDecision?.spend_token || !hasValidPayee} onClick={settle}>
         {busy ? 'Working…' : 'Reserve & commit (uses last allow token)'}
       </Button>
+      {session.lastDecision?.spend_token && !hasValidPayee && (
+        <p className="section-hint">
+          <span className="pill warn">blocked</span> Settle is disabled until your last allow is made to the payee
+          (re-propose in Step 4).
+        </p>
+      )}
       {session.txHash && (
         <CodeBlock>
           reservation  {session.reservationId} <Copy value={session.reservationId ?? ''} />
