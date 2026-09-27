@@ -231,6 +231,76 @@ export class Client {
     return this.request('POST', '/v1/compensations', { include_monthly: true, ...input }) as Promise<{ applied: boolean }>;
   }
 
+  // Marketplace — tools
+  registerProvider(input: {
+    name: string;
+    contact_email?: string;
+    payout_wallet_address: string;
+    payout_chain?: string;
+  }): Promise<{ provider_id: string; provider_token: string; status: string }> {
+    return this.request('POST', '/v1/tool-providers', input) as Promise<{
+      provider_id: string;
+      provider_token: string;
+      status: string;
+    }>;
+  }
+
+  approveProvider(id: string): Promise<{ provider_id: string; status: string }> {
+    return this.request('POST', `/v1/tool-providers/${id}/approve`, undefined) as Promise<{
+      provider_id: string;
+      status: string;
+    }>;
+  }
+
+  createTool(providerToken: string, input: {
+    provider_id: string;
+    name: string;
+    description?: string;
+    category?: string;
+    price: string;
+    price_token?: string;
+    endpoint_url: string;
+    input_schema?: Record<string, unknown>;
+    output_schema?: Record<string, unknown>;
+  }): Promise<{ tool: { id: string } }> {
+    return this.request('POST', '/v1/tools', input, {
+      headers: { 'x-provider-token': providerToken },
+    }) as Promise<{ tool: { id: string } }>;
+  }
+
+  listTools(query: { category?: string; max_price?: string } = {}): Promise<{ tools: Array<{ id: string; name: string; description: string | null; category: string; price: string; priceToken: string; endpointUrl: string; provider: { id: string; name: string } }> }> {
+    const q = new URLSearchParams();
+    if (query.category) q.set('category', query.category);
+    if (query.max_price) q.set('max_price', query.max_price);
+    return this.request('GET', `/v1/tools${q.size ? `?${q.toString()}` : ''}`, undefined) as Promise<{
+      tools: Array<{ id: string; name: string; description: string | null; category: string; price: string; priceToken: string; endpointUrl: string; provider: { id: string; name: string } }>;
+    }>;
+  }
+
+  executeTool(agentId: string, toolId: string, input: Record<string, unknown>, idempotencyKey: string): Promise<{
+    execution_id: string;
+    status: string;
+    output: unknown;
+    price_paid: string;
+    tx_hash?: string;
+    reservation_id?: string;
+  }> {
+    return this.request('POST', `/v1/tools/${toolId}/execute`, { agent_id: agentId, input }, { idempotencyKey }) as Promise<{
+      execution_id: string;
+      status: string;
+      output: unknown;
+      price_paid: string;
+      tx_hash?: string;
+      reservation_id?: string;
+    }>;
+  }
+
+  getExecution(id: string): Promise<{ execution: { id: string; status: string; pricePaid: string | null; txHash: string | null } }> {
+    return this.request('GET', `/v1/tool-executions/${id}`) as Promise<{
+      execution: { id: string; status: string; pricePaid: string | null; txHash: string | null };
+    }>;
+  }
+
   // Policy
   createPolicy(input: Record<string, unknown>): Promise<{ policy_id: string; version: number }> {
     return this.request('POST', '/v1/policies', input) as Promise<{

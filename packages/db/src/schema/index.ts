@@ -4,3 +4,4 @@ export * from './treasury.js';
 export * from './ledger.js';
 export * from './verification.js';
 export * from './events.js';
+export * from './marketplace.js';

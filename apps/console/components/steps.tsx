@@ -362,6 +362,112 @@ export function StepSpend(props: StepProps) {
   );
 }
 
+export function StepMarketplace(props: StepProps) {
+  const { session, client, busy, persist, run, toast } = props;
+  const demoUrl = process.env.NEXT_PUBLIC_DEMO_PROVIDER_URL ?? 'http://localhost:4007';
+  const demoPayout = process.env.NEXT_PUBLIC_DEMO_PAYOUT ?? '0x9965507D1a55bcC2695C58ba16FB37d819B0A4dc';
+  const [tools, setTools] = useState<Array<{ id: string; name: string; category: string; price: string; provider: { name: string } }>>([]);
+  const [selectedTool, setSelectedTool] = useState<string>('');
+  const [toolInput, setToolInput] = useState('{"position":"aave-wbtc-2x"}');
+  const [lastExec, setLastExec] = useState<string | null>(null);
+
+  const seed = () =>
+    run('seed demo marketplace', async () => {
+      const provider = await client.registerProvider({
+        name: 'Demo Data Provider',
+        payout_wallet_address: demoPayout,
+        payout_chain: 'sepolia',
+      });
+      await client.approveProvider(provider.provider_id);
+      await client.createTool(provider.provider_token, {
+        provider_id: provider.provider_id,
+        name: 'liquidation-risk',
+        description: 'Returns liquidation risk score for a position',
+        category: 'trading',
+        price: '0.10',
+        price_token: 'USDC',
+        endpoint_url: `${demoUrl}/v1/exec`,
+      });
+      const disc = await client.listTools({});
+      setTools(disc.tools);
+      setSelectedTool(disc.tools[0]?.id ?? '');
+      toast('ok', 'Demo provider + tool seeded');
+    });
+
+  const refreshTools = () =>
+    run('refresh tool list', async () => {
+      const disc = await client.listTools({});
+      setTools(disc.tools);
+      toast('info', `${disc.tools.length} tools available`);
+    });
+
+  const execute = () =>
+    run('execute paid tool', async () => {
+      if (!session.agentId) throw new Error('create an agent first (step 1)');
+      if (!selectedTool) throw new Error('seed or refresh the marketplace first');
+      let input: Record<string, unknown>;
+      try {
+        input = JSON.parse(toolInput);
+      } catch {
+        throw new Error('tool input must be valid JSON');
+      }
+      const tool = tools.find((t) => t.id === selectedTool)!;
+      const res = await client.executeTool(selectedTool, session.agentId, input, `tool-${Date.now()}`);
+      setLastExec(JSON.stringify(res.output, null, 2));
+      persist({ ...session, toolExecutions: (session.toolExecutions ?? 0) + 1, lastToolExecution: { id: res.execution_id, name: tool.name, price: res.price_paid, txHash: res.tx_hash, output: JSON.stringify(res.output) } });
+      toast('ok', `Tool "${tool.name}" executed — paid ${res.price_paid} USDC`);
+    });
+
+  return (
+    <Card title="Tool marketplace" action={<AgentBar session={session} />}>
+      <p className="section-hint">
+        Browse paid tools and execute one — the call is <b>policy-checked, paid via x402, and settled on-chain</b> to the
+        provider&apos;s registered payout address. The demo provider returns a real result only after verifying the
+        payment on-chain.
+      </p>
+      <div className="btn-row">
+        <Button disabled={busy !== null} onClick={seed}>
+          {busy ? 'Working…' : 'Seed demo provider + tool ($0.10)'}
+        </Button>
+        <Button variant="ghost" disabled={busy !== null} onClick={refreshTools}>
+          Refresh tools
+        </Button>
+      </div>
+
+      {tools.length > 0 && (
+        <>
+          <div className="divider" />
+          <Field label="Tool">
+            <Select value={selectedTool} onChange={(e) => setSelectedTool(e.target.value)}>
+              {tools.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.name} · {t.category} · ${t.price} · {t.provider.name}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          <Field label="Input (JSON)">
+            <Input value={toolInput} onChange={(e) => setToolInput(e.target.value)} />
+          </Field>
+          <Button disabled={busy !== null || !session.agentId} onClick={execute}>
+            {busy ? 'Working…' : 'Execute & pay'}
+          </Button>
+        </>
+      )}
+
+      {session.lastToolExecution && (
+        <CodeBlock>
+          tool: {session.lastToolExecution.name}
+          {'\n'}price_paid: {session.lastToolExecution.price} USDC
+          {'\n'}tx_hash: {session.lastToolExecution.txHash}
+          {'\n'}output: {session.lastToolExecution.output}
+        </CodeBlock>
+      )}
+      {lastExec && <div className="output">{lastExec}</div>}
+    </Card>
+  );
+}
+
 export function StepSettle(props: StepProps) {
   const { session, client, busy, persist, run, toast } = props;
   const [cpType, setCpType] = useState<'agent' | 'tool_provider' | 'data_provider'>('agent');

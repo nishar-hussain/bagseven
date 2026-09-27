@@ -19,6 +19,7 @@ function upstreamFor(path: string, cfg: NodeJS.ProcessEnv): Upstream {
   if (path.startsWith('/v1/policies') || path.startsWith('/v1/spend-intents') || path.startsWith('/v1/policy-checks')) return u('POLICY_URL');
   if (path.startsWith('/v1/wallets') || path.startsWith('/v1/reservations')) return u('TREASURY_URL');
   if (path.startsWith('/v1/receipts')) return u('VERIFICATION_URL');
+  if (path.startsWith('/v1/tool-providers') || path.startsWith('/v1/tools') || path.startsWith('/v1/tool-executions') || path.startsWith('/v1/mcp')) return u('MARKETPLACE_URL');
   throw new ApiError(404, 'NOT_FOUND', `no upstream for ${path}`);
 }
 
@@ -37,6 +38,7 @@ async function proxy(req: FastifyRequest, reply: FastifyReply, cfg: NodeJS.Proce
     headers['idempotency-key'] = agentId ? `${agentId}:${req.headers['idempotency-key']}` : req.headers['idempotency-key'];
   }
   if (typeof req.headers['x-guardian-token'] === 'string') headers['x-guardian-token'] = req.headers['x-guardian-token'];
+  if (typeof req.headers['x-provider-token'] === 'string') headers['x-provider-token'] = req.headers['x-provider-token'];
 
   const res = await fetch(`${upstream.baseUrl}${req.url}`, {
     method: req.method,
@@ -49,7 +51,7 @@ async function proxy(req: FastifyRequest, reply: FastifyReply, cfg: NodeJS.Proce
   return payload;
 }
 
-const BOOTSTRAP_PREFIXES = ['/healthz', '/v1/organizations', '/v1/guardians', '/v1/agents', '/v1/guardian-approvals'];
+const BOOTSTRAP_PREFIXES = ['/healthz', '/v1/organizations', '/v1/guardians', '/v1/agents', '/v1/guardian-approvals', '/v1/tool-providers', '/v1/mcp'];
 
 export function buildGatewayRoutes(app: FastifyInstance, { db, redis, config }: { db: ReturnType<typeof createDb>; redis: Redis; config: NodeJS.ProcessEnv }): void {
   void app.register(cors, {
@@ -61,7 +63,12 @@ export function buildGatewayRoutes(app: FastifyInstance, { db, redis, config }: 
 
   app.addHook('preHandler', async (req, reply) => {
     const path = req.url.split('?')[0]!;
-    const isBootstrap = BOOTSTRAP_PREFIXES.some((p) => path.startsWith(p));
+    // Marketplace public paths: discovery (GET /v1/tools), tool registration +
+    // provider management (provider-token / platform auth at the service). Tool
+    // EXECUTION (POST /v1/tools/:id/execute) still requires an agent envelope.
+    const isToolExecution = req.method === 'POST' && /^\/v1\/tools\/[^/]+\/execute$/.test(path);
+    const isMarketplacePublic = path.startsWith('/v1/tool-providers') || path.startsWith('/v1/mcp') || (path.startsWith('/v1/tools') && !isToolExecution);
+    const isBootstrap = BOOTSTRAP_PREFIXES.some((p) => path.startsWith(p)) || isMarketplacePublic;
     if (isBootstrap) return;
     await envelopeAuth({
       getPublicKey: async (agentId) => {

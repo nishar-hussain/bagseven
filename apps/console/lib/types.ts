@@ -1,4 +1,4 @@
-export type StepKey = 'bootstrap' | 'wallet' | 'policy' | 'spend' | 'settle';
+export type StepKey = 'bootstrap' | 'wallet' | 'policy' | 'spend' | 'settle' | 'marketplace';
 
 export interface Balance {
   token: string;
@@ -56,6 +56,8 @@ export interface Session {
   reservationId?: string;
   txHash?: string;
   receiptId?: string;
+  toolExecutions?: number;
+  lastToolExecution?: { id: string; name: string; price: string; txHash?: string; output?: string };
 }
 
 export const EMPTY_SESSION: Session = {
@@ -70,6 +72,7 @@ export const EMPTY_SESSION: Session = {
   agentStatus: '',
   balances: [],
   spendHistory: [],
+  toolExecutions: 0,
 };
 
 export interface Toast {

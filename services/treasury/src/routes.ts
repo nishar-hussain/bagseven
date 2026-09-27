@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { and, eq, sql } from 'drizzle-orm';
-import { agents, balances, ledgerEntries, policyChecks, reservations, settlements, wallets } from '@agentos/db';
+import { agents, balances, ledgerEntries, policyChecks, reservations, settlements, toolProviders, wallets } from '@agentos/db';
 import { toMicroUnits } from '@agentos/money';
 import { ApiError, idempotencyOnSend, idempotencyPreHandler, type ServiceDeps } from '@agentos/server';
 import { peekSpendTokenClaims, verifySpendToken } from '@agentos/auth';
@@ -64,7 +64,13 @@ async function resolvePayee(
     });
     if (payee) return payee.address;
   }
-  // tool/data providers (Phase 2/3) will resolve their registered payout wallet here.
+  if (counterpartyType === 'tool_provider') {
+    // Phase 2: settlement goes to the provider's REGISTERED payout address —
+    // the payTo-binding enforcement point. Never to an address supplied by the request.
+    const provider = await db.query.toolProviders.findFirst({ where: eq(toolProviders.id, counterpartyId) });
+    if (provider && provider.payoutChain === chain) return provider.payoutWalletAddress;
+  }
+  // data providers (Phase 3) will resolve here.
   return '0x0000000000000000000000000000000000000000';
 }
 

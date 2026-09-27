@@ -9,18 +9,21 @@ See `docs/DECISIONS.md` for the hard invariants the build encodes (spend_token, 
 ## Repository layout
 
 ```
-apps/console          # Next.js developer console (browser UI for the Phase-1 flows)
+apps/console          # Next.js developer console (browser UI: identity → treasury → marketplace)
 services/             # independently deployable services
   gateway/            # single public ingress: envelope auth, rate limit, routing, CORS
   identity/           # agents, orgs, guardians
   policy/             # budgets, limits, delegation, spend_token issuance
   treasury/           # wallets, reservations, co-signing, signer abstraction
   verification/       # append-only receipts, hash chain
-  (payments, marketplace-*, directory, evolution)  # later phases
+  marketplace-tools/  # tool registry, discovery, x402-gated execution, MCP (Phase 2)
+  payments/           # x402 orchestration (the 402 → pay → retry dance)
+  demo-provider/      # dev-only x402 provider for local testing
+  (marketplace-data, directory, evolution)  # later phases
 packages/             # shared libraries
   db, money, auth, config, events, server, sdk, testing
 contracts/            # Solidity (later phases)
-scripts/              # key generation + e2e verification
+scripts/              # key generation + phase E2E verification
 deploy/docker-compose.yml
 ```
 
@@ -97,6 +100,31 @@ The concurrency suite (`services/policy/src/counters.integration.test.ts`) is th
 1. Agent proposes a spend → `POST /v1/spend-intents` → Policy evaluates (static rules) + atomic Redis budget gate (Lua) → on ALLOW issues a signed, single-use, 30s-expiry **spend_token** bound to amount/currency/chain/category/counterparty.
 2. Treasury co-signs a payment only on presentation of a valid token (`POST /v1/reservations`), then `commit` settles it: debits the payer, credits the payee, writes a hash-chained receipt.
 3. Delegation: a child's spend atomically decrements every ancestor's remaining budget (`spend:child:{anc}` counters), so no chain of sub-agents can exceed the parent's cap.
+
+## Phase 2 — Tool Marketplace
+
+A paid tool call runs through the whole Phase-1 pipeline, plus x402:
+
+```
+POST /v1/tools/:id/execute  (marketplace-tools)
+  → policy spend-intent (tool_id, category, price) → spend_token
+  → treasury reserve (counterparty = provider, type tool_provider)
+  → payments x402: call provider → 402 challenge {amount,token,chain,payTo,nonce}
+      validate (amount = listed price; payTo = provider's REGISTERED payout — else abort)
+  → treasury commit → real transfer to registered payout → tx hash
+  → retry provider with X-Payment → 200 + result → receipt
+```
+
+- **Providers** register (`pending`) then get approved (`active`); tools carry a price, category, and endpoint. Discovery: `GET /v1/tools?category=&max_price=`.
+- **PayTo binding (2.6):** the settlement goes to the provider's *registered* payout address, never a challenge-supplied one; a mismatch aborts the payment *before any signature*.
+- **MCP (2.4):** `http://localhost:4008/v1/mcp` exposes every active tool to any MCP-compatible agent framework (`tools/list`, `tools/call`).
+- **Demo provider:** `services/demo-provider` returns 402-without-payment and 200-with-payment (verifying the tx on-chain), so the whole flow is testable locally.
+
+Verify end-to-end (against whatever `SEPOLIA_RPC_URL` points at):
+```bash
+pnpm exec tsx scripts/e2e-phase2.ts
+```
+Covers: onboard provider → list tool → paid execution → provider paid exactly the price on-chain → buyer ledger debited → receipt → policy-denied tool → payTo-redirect blocked. 11/11 PASS.
 
 ## Real wallets on Base testnet (slice 1.6)
 

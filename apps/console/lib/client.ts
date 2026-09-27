@@ -115,6 +115,26 @@ export class ConsoleClient {
   getAgentReceipts(agentId: string) {
     return this.request<{ receipts: Array<{ id: string; proofHash: string; prevHash: string }> }>(`GET`, `/v1/agents/${agentId}/receipts`);
   }
+
+  // Marketplace
+  registerProvider(input: { name: string; payout_wallet_address: string; payout_chain?: string }) {
+    return this.request<{ provider_id: string; provider_token: string; status: string }>('POST', '/v1/tool-providers', input, { signed: false });
+  }
+  approveProvider(id: string) {
+    return this.request<{ provider_id: string; status: string }>('POST', `/v1/tool-providers/${id}/approve`, undefined, { signed: false });
+  }
+  createTool(providerToken: string, input: Record<string, unknown>) {
+    return this.request<{ tool: { id: string } }>('POST', '/v1/tools', input, { headers: { 'x-provider-token': providerToken } });
+  }
+  listTools(query: { category?: string; max_price?: string } = {}) {
+    const q = new URLSearchParams();
+    if (query.category) q.set('category', query.category);
+    if (query.max_price) q.set('max_price', query.max_price);
+    return this.request<{ tools: Array<{ id: string; name: string; description: string | null; category: string; price: string; endpointUrl: string; provider: { id: string; name: string } }> }>(`GET`, `/v1/tools${q.size ? `?${q.toString()}` : ''}`, undefined, { signed: false });
+  }
+  executeTool(toolId: string, agentId: string, input: Record<string, unknown>, idemKey: string) {
+    return this.request<{ execution_id: string; status: string; output: unknown; price_paid: string; tx_hash?: string }>('POST', `/v1/tools/${toolId}/execute`, { agent_id: agentId, input }, { idempotencyKey: idemKey });
+  }
 }
 
 export function makeIdempotencyKey(agentId: string, label: string): string {

@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ConsoleClient } from '../lib/client';
 import { EMPTY_SESSION, type LogEntry, type Session, type StepKey, type Toast } from '../lib/types';
 import { Card, Copy, KV } from '../components/ui';
-import { StepBootstrap, StepWallet, StepPolicy, StepSpend, StepSettle, type StepProps } from '../components/steps';
+import { StepBootstrap, StepWallet, StepPolicy, StepSpend, StepSettle, StepMarketplace, type StepProps } from '../components/steps';
 
 const STEPS: Array<{ key: StepKey; label: string; hint: string }> = [
   { key: 'bootstrap', label: 'Create agent', hint: 'org · guardian · identity' },
@@ -12,9 +12,10 @@ const STEPS: Array<{ key: StepKey; label: string; hint: string }> = [
   { key: 'policy', label: 'Policy', hint: 'limits · thresholds' },
   { key: 'spend', label: 'Spend intents', hint: 'allow · deny · token' },
   { key: 'settle', label: 'Reserve & settle', hint: 'co-sign · receipt' },
+  { key: 'marketplace', label: 'Marketplace', hint: 'browse · pay · execute' },
 ];
 
-const ORDER: StepKey[] = ['bootstrap', 'wallet', 'policy', 'spend', 'settle'];
+const ORDER: StepKey[] = ['bootstrap', 'wallet', 'policy', 'spend', 'settle', 'marketplace'];
 
 function isDone(s: Session, key: StepKey): boolean {
   switch (key) {
@@ -28,6 +29,8 @@ function isDone(s: Session, key: StepKey): boolean {
       return s.spendHistory.length > 0;
     case 'settle':
       return !!s.txHash;
+    case 'marketplace':
+      return (s.toolExecutions ?? 0) > 0;
   }
 }
 
@@ -183,6 +186,7 @@ export default function Page() {
           {current.key === 'policy' && <StepPolicy {...stepProps} />}
           {current.key === 'spend' && <StepSpend {...stepProps} />}
           {current.key === 'settle' && <StepSettle {...stepProps} />}
+          {current.key === 'marketplace' && <StepMarketplace {...stepProps} />}
         </main>
       </div>
 

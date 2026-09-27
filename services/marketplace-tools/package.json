@@ -3,10 +3,36 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
   "scripts": {
-    "build": "echo \"@agentos/marketplace-tools: not implemented yet\"",
-    "typecheck": "echo \"@agentos/marketplace-tools: not implemented yet\"",
-    "lint": "echo \"@agentos/marketplace-tools: not implemented yet\"",
-    "test": "echo \"@agentos/marketplace-tools: not implemented yet\""
+    "build": "rm -rf dist && tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint src --max-warnings=0",
+    "test": "vitest run --passWithNoTests",
+    "dev": "node --env-file-if-exists=../../.env --import tsx --watch src/index.ts",
+    "start": "node --env-file-if-exists=../../.env dist/index.js"
+  },
+  "dependencies": {
+    "@agentos/auth": "workspace:*",
+    "@agentos/db": "workspace:*",
+    "@agentos/money": "workspace:*",
+    "@agentos/server": "workspace:*",
+    "@modelcontextprotocol/sdk": "^1.30.1",
+    "drizzle-orm": "^0.45.2",
+    "express": "^5.2.1",
+    "fastify": "^5.12.5",
+    "ioredis": "^6.0.0",
+    "pg": "^8.23.0",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6"
   }
 }
