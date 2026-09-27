@@ -22,41 +22,50 @@ function sanitizeName(name: string): string {
 export async function startMcpServer({ db, config }: { db: Database; config: NodeJS.ProcessEnv }): Promise<void> {
   const marketplaceUrl = config.MARKETPLACE_URL ?? 'http://localhost:4005';
   const server = new McpServer({ name: 'agentos-marketplace', version: '0.1.0' }, { capabilities: { tools: {} } });
+  const registered = new Set<string>();
 
-  const rows = await db.select().from(tools).where(eq(tools.status, 'active'));
-  for (const tool of rows) {
-    const provider = await db.query.toolProviders.findFirst({ where: eq(toolProviders.id, tool.providerId) });
-    if (!provider || provider.status !== 'active') continue;
-    const inputSchema = (tool.inputSchema as Record<string, unknown>) ?? {};
-    const extraProps = Object.fromEntries(
-      Object.entries(inputSchema).map(([key]) => [key, z.any()]),
-    );
-    server.registerTool(
-      sanitizeName(tool.name),
-      {
-        title: tool.name,
-        description: `${tool.description ?? ''} Price ${tool.price} ${tool.priceToken}, category ${tool.category}. Provider: ${provider.name}. Supply agent_id of the paying AgentOS agent.`,
-        inputSchema: z.object({
-          agent_id: z.string().describe('AgentOS agent id that pays for and owns this call'),
-          ...extraProps,
-        }),
-      },
-      async (args: Record<string, unknown>) => {
-        const agentId = String(args.agent_id);
-        const { agent_id: _agentId, ...input } = args;
-        const res = await fetch(`${marketplaceUrl}/v1/tools/${tool.id}/execute`, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ agent_id: agentId, input }),
-        });
-        const body = (await res.json()) as { error?: { message?: string } };
-        if (!res.ok) {
-          return { content: [{ type: 'text', text: `ERROR: ${body?.error?.message ?? 'execution failed'}` }], isError: true };
-        }
-        return { content: [{ type: 'text', text: JSON.stringify(body) }] };
-      },
-    );
-  }
+  const refreshTools = async () => {
+    const rows = await db.select().from(tools).where(eq(tools.status, 'active'));
+    for (const tool of rows) {
+      const provider = await db.query.toolProviders.findFirst({ where: eq(toolProviders.id, tool.providerId) });
+      if (!provider || provider.status !== 'active') continue;
+      const name = sanitizeName(tool.name);
+      if (registered.has(name)) continue;
+      const inputSchema = (tool.inputSchema as Record<string, unknown>) ?? {};
+      const extraProps = Object.fromEntries(Object.entries(inputSchema).map(([key]) => [key, z.any()]));
+      server.registerTool(
+        name,
+        {
+          title: tool.name,
+          description: `${tool.description ?? ''} Price ${tool.price} ${tool.priceToken}, category ${tool.category}. Provider: ${provider.name}. Supply agent_id of the paying AgentOS agent.`,
+          inputSchema: z.object({
+            agent_id: z.string().describe('AgentOS agent id that pays for and owns this call'),
+            ...extraProps,
+          }),
+        },
+        async (args: Record<string, unknown>) => {
+          const agentId = String(args.agent_id);
+          const { agent_id: _agentId, ...input } = args;
+          const res = await fetch(`${marketplaceUrl}/v1/tools/${tool.id}/execute`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ agent_id: agentId, input }),
+          });
+          const body = (await res.json()) as { error?: { message?: string } };
+          if (!res.ok) {
+            return { content: [{ type: 'text', text: `ERROR: ${body?.error?.message ?? 'execution failed'}` }], isError: true };
+          }
+          return { content: [{ type: 'text', text: JSON.stringify(body) }] };
+        },
+      );
+      registered.add(name);
+    }
+  };
+
+  await refreshTools();
+  setInterval(() => {
+    refreshTools().catch((err) => console.error('[mcp] refresh failed', err));
+  }, 30_000);
 
   const app = express();
   app.use(express.json({ limit: '1mb' }));

@@ -27,8 +27,8 @@ export function AgentBar({ session }: { session: Session }) {
 
 export function StepBootstrap(props: StepProps) {
   const { session, client, busy, persist, run, toast, onNext } = props;
-  const [orgName, setOrgName] = useState('Acme Research');
-  const [agentName, setAgentName] = useState('DeFi Treasury Agent');
+  const [orgName, setOrgName] = useState('');
+  const [agentName, setAgentName] = useState('');
   const [capabilities, setCapabilities] = useState('trading, data-purchase');
 
   const bootstrap = () =>
@@ -70,16 +70,16 @@ export function StepBootstrap(props: StepProps) {
       </p>
       <div className="grid-2">
         <Field label="Organization name">
-          <Input value={orgName} onChange={(e) => setOrgName(e.target.value)} />
+          <Input value={orgName} onChange={(e) => setOrgName(e.target.value)} placeholder="e.g. Acme Research" />
         </Field>
         <Field label="Agent name">
-          <Input value={agentName} onChange={(e) => setAgentName(e.target.value)} />
+          <Input value={agentName} onChange={(e) => setAgentName(e.target.value)} placeholder="e.g. DeFi Treasury Agent" />
         </Field>
       </div>
       <Field label="Capabilities (comma separated)">
         <Input value={capabilities} onChange={(e) => setCapabilities(e.target.value)} />
       </Field>
-      <Button disabled={busy !== null} onClick={bootstrap}>
+      <Button disabled={busy !== null || !orgName.trim() || !agentName.trim()} onClick={bootstrap}>
         {busy ? 'Working…' : 'Create & confirm agent'}
       </Button>
       {session.agentId && (

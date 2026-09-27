@@ -36,6 +36,7 @@ function isDone(s: Session, key: StepKey): boolean {
 
 let toastId = 0;
 let logId = 0;
+const UI_KEY = 'agentos-console';
 
 export default function Page() {
   const gateway = process.env.NEXT_PUBLIC_GATEWAY_URL ?? 'http://localhost:4000';
@@ -46,27 +47,39 @@ export default function Page() {
   const [busy, setBusy] = useState<string | null>(null);
   const [feed, setFeed] = useState<LogEntry[]>([]);
   const [toasts, setToasts] = useState<Toast[]>([]);
+  const [restored, setRestored] = useState(false);
 
+  // Restore the full UI state (session + active step + activity feed) after refresh.
   useEffect(() => {
     try {
-      const raw = localStorage.getItem('agentos-session');
+      const raw = localStorage.getItem(UI_KEY);
       if (raw) {
-        const s = JSON.parse(raw) as Session;
-        setSession(s);
-        if (s.agentId && s.signingKeyPem) client.setAgent(s.agentId, s.signingKeyPem);
+        const saved = JSON.parse(raw) as { session?: Session; active?: StepKey; feed?: LogEntry[] };
+        if (saved.session) {
+          setSession(saved.session);
+          if (saved.session.agentId && saved.session.signingKeyPem) client.setAgent(saved.session.agentId, saved.session.signingKeyPem);
+        }
+        if (saved.active) setActive(saved.active);
+        if (saved.feed) setFeed(saved.feed);
       }
     } catch {
       /* ignore */
     }
+    setRestored(true);
   }, [client]);
 
-  const persist = useCallback((s: Session) => {
-    setSession(s);
+  // Persist everything whenever any of it changes — a refresh restores it all.
+  useEffect(() => {
+    if (!restored) return;
     try {
-      localStorage.setItem('agentos-session', JSON.stringify(s));
+      localStorage.setItem(UI_KEY, JSON.stringify({ session, active, feed }));
     } catch {
       /* ignore */
     }
+  }, [session, active, feed, restored]);
+
+  const persist = useCallback((s: Session) => {
+    setSession(s);
   }, []);
 
   const toast = useCallback((kind: Toast['kind'], message: string) => {
@@ -106,7 +119,7 @@ export default function Page() {
   const doneCount = ORDER.filter((k) => isDone(session, k)).length;
 
   const reset = () => {
-    localStorage.removeItem('agentos-session');
+    localStorage.removeItem(UI_KEY);
     setSession(EMPTY_SESSION);
     setFeed([]);
     setActive('bootstrap');
