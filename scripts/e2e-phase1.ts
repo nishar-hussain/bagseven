@@ -12,7 +12,6 @@ import { Client } from '@agentos/sdk';
 import { eq as eqMoney } from '@agentos/money';
 
 const GATEWAY = process.env.GATEWAY_URL ?? 'http://localhost:4000';
-const COUNTERPARTY = crypto.randomUUID();
 
 function log(step: string, ok: boolean, detail?: unknown): void {
   const tag = ok ? 'PASS' : 'FAIL';
@@ -47,6 +46,17 @@ async function main(): Promise<void> {
   log('guardian confirms agent -> active (slice 1.2)', confirmed.status === 'active', confirmed.status);
 
   const agentClient = new Client({ baseUrl: GATEWAY, agentId: agent.agent_id, privateKeyPem: agent.signing_private_key_pem });
+
+  // Real payee: a second agent with a wallet, so the settlement has a real destination.
+  const payeeRaw = await consoleClient.createAgent({
+    owner_org_id: org.organization.id,
+    guardian_id: guardian.guardian.id,
+    display_name: 'E2E Payee',
+    capabilities: [],
+  });
+  await consoleClient.confirmAgent(payeeRaw.agent_id, guardian.guardian_token);
+  await agentClient.provisionWallet({ agent_id: payeeRaw.agent_id, chain: 'sepolia' });
+  const COUNTERPARTY = payeeRaw.agent_id;
 
   // 1.3 Provision wallet + fund via dev faucet
   const wallet = await agentClient.provisionWallet({ agent_id: agent.agent_id, chain: 'sepolia' });

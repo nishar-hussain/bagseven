@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import type { ConsoleClient } from '../lib/client';
+import { ConsoleClient } from '../lib/client';
 import type { Session, SpendRecord } from '../lib/types';
 import { Button, Card, CodeBlock, Copy, Field, Input, KV, Pill, Select, StatusPill } from './ui';
 
@@ -238,7 +238,7 @@ export function StepSpend(props: StepProps) {
   const { session, client, busy, persist, run, toast } = props;
   const [amount, setAmount] = useState('3.00');
   const [category, setCategory] = useState('data-purchase');
-  const [counterparty, setCounterparty] = useState(crypto.randomUUID());
+  const [counterparty, setCounterparty] = useState(session.payeeAgent?.id ?? crypto.randomUUID());
 
   const propose = (amt: string, label: string, idemKey: string, cat = category) =>
     run(`spend intent · ${label} (${amt} USDC)`, async () => {
@@ -475,6 +475,23 @@ export function StepSettle(props: StepProps) {
   const refresh = (s: Session) =>
     client.getWallet(s.agentId).then((w) => ({ ...s, balances: w.wallets[0]?.balances ?? [] }));
 
+  const createPayee = () =>
+    run('create payee agent (real recipient)', async () => {
+      if (!session.orgId || !session.guardianId || !session.guardianToken) throw new Error('create an agent first (step 1)');
+      const payeeRaw = await client.createAgent({
+        owner_org_id: session.orgId,
+        guardian_id: session.guardianId,
+        display_name: 'Payee Agent',
+        capabilities: [],
+      });
+      await client.confirmAgent(payeeRaw.agent_id, session.guardianToken);
+      const payeeClient = new ConsoleClient(client.url);
+      payeeClient.setAgent(payeeRaw.agent_id, payeeRaw.signing_private_key_pem);
+      const w = await payeeClient.provisionWallet(payeeRaw.agent_id, 'sepolia');
+      persist({ ...session, payeeAgent: { id: payeeRaw.agent_id, address: w.wallet.address } });
+      toast('ok', 'Payee agent created — propose to it in Step 4, then come back to settle');
+    });
+
   const doReserveAndCommit = async (token: string, decision: Session['lastDecision'] & { counterparty_id: string; amount: string }) => {
     if (!session.walletId) throw new Error('provision a wallet first (step 2)');
     let res: { reservation_id: string };
@@ -496,6 +513,9 @@ export function StepSettle(props: StepProps) {
           `Wallet has insufficient USDC — fund it in Step 2 (Credit) before settling. (available: ${session.balances.find((b) => b.token === 'USDC')?.amount ?? 0})`,
           { cause: err },
         );
+      }
+      if ((err as { code?: string }).code === 'UNRESOLVABLE_PAYEE') {
+        throw new Error('That spend has no real recipient — create a payee agent below, re-propose to it in Step 4, then settle again.', { cause: err });
       }
       throw err;
     }
@@ -559,6 +579,28 @@ export function StepSettle(props: StepProps) {
         <span className="pill warn">single-use · 30s expiry</span> If the token expired while you read this, the
         console mints a fresh one automatically and retries.
       </p>
+
+      <div className="card-title" style={{ marginTop: 6 }}>
+        <h3>Recipient</h3>
+      </div>
+      {session.payeeAgent ? (
+        <CodeBlock>
+          payee_agent : {session.payeeAgent.id} <Copy value={session.payeeAgent.id} />
+          {'\n'}payee_address: {session.payeeAgent.address}
+        </CodeBlock>
+      ) : (
+        <p className="section-hint">
+          The payment goes to a real agent&apos;s wallet — not a random id. Create a payee, then in <b>Step 4</b> propose
+          the spend to its id (it&apos;s pre-filled), then settle here.
+        </p>
+      )}
+      {!session.payeeAgent && (
+        <Button variant="ghost" disabled={busy !== null} onClick={createPayee}>
+          {busy ? 'Working…' : 'Create a payee agent'}
+        </Button>
+      )}
+      <div className="divider" />
+
       <Field label="Counterparty type">
         <Select value={cpType} onChange={(e) => setCpType(e.target.value as 'agent')}>
           <option value="agent">agent</option>

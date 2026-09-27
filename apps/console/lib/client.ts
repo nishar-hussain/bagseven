@@ -18,6 +18,10 @@ export class ConsoleClient {
   private agentId?: string;
   private privateKeyPromise?: Promise<CryptoKey>;
 
+  get url(): string {
+    return this.baseUrl;
+  }
+
   constructor(baseUrl: string) {
     this.baseUrl = baseUrl.replace(/\/$/, '');
   }

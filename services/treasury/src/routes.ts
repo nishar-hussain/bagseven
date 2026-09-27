@@ -57,21 +57,23 @@ async function resolvePayee(
   counterpartyId: string | null | undefined,
   chain: string,
 ): Promise<string> {
-  if (!counterpartyId) return '0x0000000000000000000000000000000000000000';
+  if (!counterpartyId) throw new ApiError(409, 'UNRESOLVABLE_PAYEE', 'reservation has no counterparty to pay');
   if (counterpartyType === 'agent') {
     const payee = await db.query.wallets.findFirst({
       where: and(eq(wallets.agentId, counterpartyId), eq(wallets.chain, chain)),
     });
     if (payee) return payee.address;
+    throw new ApiError(409, 'UNRESOLVABLE_PAYEE', `no wallet found for agent ${counterpartyId} on chain ${chain}`);
   }
   if (counterpartyType === 'tool_provider') {
     // Phase 2: settlement goes to the provider's REGISTERED payout address —
     // the payTo-binding enforcement point. Never to an address supplied by the request.
     const provider = await db.query.toolProviders.findFirst({ where: eq(toolProviders.id, counterpartyId) });
     if (provider && provider.payoutChain === chain) return provider.payoutWalletAddress;
+    throw new ApiError(409, 'UNRESOLVABLE_PAYEE', `no registered payout for provider ${counterpartyId} on chain ${chain}`);
   }
   // data providers (Phase 3) will resolve here.
-  return '0x0000000000000000000000000000000000000000';
+  throw new ApiError(409, 'UNRESOLVABLE_PAYEE', `unsupported counterparty type ${counterpartyType ?? 'none'}`);
 }
 
 export function buildTreasuryRoutes(app: FastifyInstance, { db, redis, config }: ServiceDeps): void {

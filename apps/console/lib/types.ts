@@ -58,6 +58,7 @@ export interface Session {
   receiptId?: string;
   toolExecutions?: number;
   lastToolExecution?: { id: string; name: string; price: string; txHash?: string; output?: string };
+  payeeAgent?: { id: string; address: string };
 }
 
 export const EMPTY_SESSION: Session = {

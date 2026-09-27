@@ -1,0 +1,10 @@
+import { privateKeyToAccount } from 'viem/accounts';
+import { createPublicClient, http, erc20Abi } from 'viem';
+import { sepolia } from 'viem/chains';
+import { readFileSync } from 'node:fs';
+const env = Object.fromEntries(readFileSync('.env','utf8').split('\n').filter(l=>l.includes('=')).map(l=>{const i=l.indexOf('=');return [l.slice(0,i),l.slice(i+1)];}));
+const master=privateKeyToAccount(env.TREASURY_MASTER_PRIVATE_KEY);
+const pc=createPublicClient({chain:sepolia,transport:http(env.SEPOLIA_RPC_URL)});
+const eth=await pc.getBalance({address:master.address});
+const usdc=await pc.readContract({address:env.SEPOLIA_USDC,abi:erc20Abi,functionName:'balanceOf',args:[master.address]});
+console.log('master',master.address,'ETH',(Number(eth)/1e18).toFixed(4),'USDC',(Number(usdc)/1e6).toFixed(2));
