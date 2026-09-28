@@ -6,6 +6,9 @@ import './globals.css';
 export const metadata: Metadata = {
   title: 'bagseven',
   description: 'bagseven — infrastructure for autonomous AI agents: identity, treasury, policy, marketplaces',
+  icons: {
+    icon: '/icon.svg',
+  },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
