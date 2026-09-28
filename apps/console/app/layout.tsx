@@ -1,15 +1,22 @@
 import type { Metadata } from 'next';
+import { ThemeProvider } from '../components/theme-provider';
+import { Toaster } from '../components/ui/sonner';
 import './globals.css';
 
 export const metadata: Metadata = {
   title: 'AgentOS Console',
-  description: 'Developer console for AgentOS — identity, treasury, policy',
+  description: 'Infrastructure for autonomous AI agents — identity, treasury, policy, marketplaces',
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
-      <body>{children}</body>
+    <html lang="en" className="dark">
+      <body className="font-sans antialiased">
+        <ThemeProvider>
+          {children}
+          <Toaster />
+        </ThemeProvider>
+      </body>
     </html>
   );
 }
