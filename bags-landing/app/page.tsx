@@ -12,6 +12,7 @@ import {
   ArrowRight,
   Sparkles,
   ChevronDown,
+  CircleDollarSign,
 } from 'lucide-react';
 
 const CONSOLE_URL = process.env.NEXT_PUBLIC_CONSOLE_URL ?? 'http://localhost:3000';
@@ -77,8 +78,8 @@ export default function Home() {
       <nav className="fixed top-0 left-0 right-0 z-50 bg-black/40 backdrop-blur-md py-4 px-6 border-b border-white/10">
         <div className="max-w-7xl mx-auto flex justify-between items-center">
           <Link href="/" className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-lg bg-white flex items-center justify-center">
-              <span className="text-black font-bold text-sm">b</span>
+            <div className="w-9 h-9 rounded-lg bg-white flex items-center justify-center shrink-0">
+              <CircleDollarSign className="w-5 h-5 text-black" />
             </div>
             <span className="font-semibold text-lg tracking-tight">bagseven</span>
           </Link>
@@ -93,7 +94,7 @@ export default function Home() {
             target="_blank"
             className="flex items-center gap-1.5 rounded-lg bg-emerald-400 text-black text-sm font-medium px-4 py-2 hover:bg-emerald-300 transition-colors"
           >
-            Open Console <ArrowRight className="w-4 h-4" />
+            Get Started <ArrowRight className="w-4 h-4" />
           </Link>
         </div>
       </nav>
@@ -119,7 +120,7 @@ export default function Home() {
                 target="_blank"
                 className="rounded-lg bg-emerald-400 text-black font-medium px-6 py-3 text-base hover:bg-emerald-300 hover:scale-[1.02] transition-all duration-300"
               >
-                Open the Console
+                Get Started <ArrowRight className="inline w-4 h-4 ml-1" />
               </Link>
               <a
                 href="#platform"
@@ -285,7 +286,7 @@ export default function Home() {
                 target="_blank"
                 className="rounded-lg bg-black text-white font-medium px-8 py-3 text-base hover:bg-black/80 transition-colors"
               >
-                Open the Console
+                Get Started <ArrowRight className="inline w-4 h-4 ml-1" />
               </Link>
             </div>
           </div>
@@ -296,8 +297,8 @@ export default function Home() {
       <footer className="border-t border-white/10 py-8 px-6">
         <div className="max-w-7xl mx-auto flex flex-col sm:flex-row justify-between items-center gap-4">
           <div className="flex items-center gap-2">
-            <div className="w-6 h-6 rounded-md bg-white flex items-center justify-center">
-              <span className="text-black font-bold text-[10px]">b</span>
+            <div className="w-7 h-7 rounded-md bg-white flex items-center justify-center">
+              <CircleDollarSign className="w-4 h-4 text-black" />
             </div>
             <span className="text-sm font-medium">bagseven</span>
           </div>
