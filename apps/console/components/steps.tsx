@@ -97,7 +97,12 @@ export function StepBootstrap(props: StepProps) {
 
 export function StepWallet(props: StepProps) {
   const { session, client, busy, persist, run, toast, onNext } = props;
-  const [fundAmount, setFundAmount] = useState('10.00');
+  const [fundAmount, setFundAmount] = useState(session.fundAmount ?? '10.00');
+
+  const setFundAmountPersist = (v: string) => {
+    setFundAmount(v);
+    persist({ ...session, fundAmount: v });
+  };
 
   const refresh = (s: Session) =>
     client.getWallet(s.agentId).then((w) => {
@@ -126,16 +131,28 @@ export function StepWallet(props: StepProps) {
 
   // Fund from the USER's own wallet via a wallet popup: USDC is deducted from the
   // connected wallet and sent to the agent's wallet on-chain, then the ledger is
-  // reconciled with what actually arrived.
+  // reconciled with what actually arrived. Sepolia blocks take ~12s, so we poll
+  // reconcile until the USDC shows up instead of a fixed short wait.
   const fundFromWallet = () =>
     run(`fund ${fundAmount} USDC from my wallet`, async () => {
       if (!session.walletId) throw new Error('provision a wallet first');
       if (!session.userWallet) throw new Error('connect your wallet first');
       const txHash = await sendUsdc(session.userWallet, session.walletAddress!, fundAmount);
-      await new Promise((r) => setTimeout(r, 3000)); // allow the tx to confirm
-      const reconciled = await client.reconcileWallet(session.walletId);
-      persist(await refresh({ ...session, balances: reconciled.balances }));
-      toast('ok', `Sent ${fundAmount} USDC from your wallet — tx ${txHash.slice(0, 12)}…`);
+      toast('info', `Transaction sent — waiting for on-chain confirmation…`);
+      let reconciled: { balances: Array<{ token: string; amount: string; reservedAmount: string }> } | null = null;
+      for (let i = 0; i < 30; i++) {
+        await new Promise((r) => setTimeout(r, 4000));
+        reconciled = await client.reconcileWallet(session.walletId);
+        const usdc = reconciled.balances.find((b) => b.token === 'USDC');
+        if (usdc && Number(usdc.amount) >= Number(fundAmount)) break;
+      }
+      persist(await refresh({ ...session, balances: reconciled?.balances ?? session.balances }));
+      const usdcNow = (reconciled?.balances ?? session.balances).find((b) => b.token === 'USDC');
+      if (usdcNow && Number(usdcNow.amount) >= Number(fundAmount)) {
+        toast('ok', `Sent ${fundAmount} USDC from your wallet — tx ${txHash.slice(0, 12)}…`);
+      } else {
+        toast('info', `Tx ${txHash.slice(0, 12)}… sent but not yet confirmed — re-run "Send" or reconcile again shortly.`);
+      }
     });
 
   const fund = () =>
@@ -167,7 +184,7 @@ export function StepWallet(props: StepProps) {
         <>
           <div className="grid-3">
             <Field label="Fund amount (USDC)">
-              <Input value={fundAmount} onChange={(e) => setFundAmount(e.target.value)} />
+              <Input value={fundAmount} onChange={(e) => setFundAmountPersist(e.target.value)} />
             </Field>
             <div className="flex" style={{ alignItems: 'flex-end' }}>
               {session.userWallet ? (
@@ -283,9 +300,15 @@ export function StepPolicy(props: StepProps) {
 
 export function StepSpend(props: StepProps) {
   const { session, client, busy, persist, run, toast } = props;
-  const [amount, setAmount] = useState('3.00');
-  const [category, setCategory] = useState('data-purchase');
-  const [counterparty, setCounterparty] = useState(session.payeeAgent?.id ?? crypto.randomUUID());
+  const [amount, setAmount] = useState(session.spendForm?.amount ?? '3.00');
+  const [category, setCategory] = useState(session.spendForm?.category ?? 'data-purchase');
+  const [counterparty, setCounterparty] = useState(
+    session.spendForm?.counterparty ?? session.payeeAgent?.id ?? crypto.randomUUID(),
+  );
+
+  const persistForm = (a: string, cat: string, cp: string) => {
+    persist({ ...session, spendForm: { amount: a, category: cat, counterparty: cp } });
+  };
 
   const propose = (amt: string, label: string, idemKey: string, cat = category) =>
     run(`spend intent · ${label} (${amt} USDC)`, async () => {
@@ -336,17 +359,17 @@ export function StepSpend(props: StepProps) {
       </p>
       <div className="grid-3">
         <Field label="Amount (USDC)">
-          <Input value={amount} onChange={(e) => setAmount(e.target.value)} />
+          <Input value={amount} onChange={(e) => { setAmount(e.target.value); persistForm(e.target.value, category, counterparty); }} />
         </Field>
         <Field label="Category">
-          <Select value={category} onChange={(e) => setCategory(e.target.value)}>
+          <Select value={category} onChange={(e) => { setCategory(e.target.value); persistForm(amount, e.target.value, counterparty); }}>
             <option value="data-purchase">data-purchase (cat budget $10)</option>
             <option value="trading">trading</option>
             <option value="gambling">gambling (not allowed)</option>
           </Select>
         </Field>
         <Field label="Counterparty (uuid)">
-          <Input value={counterparty} onChange={(e) => setCounterparty(e.target.value)} />
+          <Input value={counterparty} onChange={(e) => { setCounterparty(e.target.value); persistForm(amount, category, e.target.value); }} />
         </Field>
       </div>
       <div className="btn-row">
@@ -415,7 +438,7 @@ export function StepMarketplace(props: StepProps) {
   const demoPayout = process.env.NEXT_PUBLIC_DEMO_PAYOUT ?? '0x9965507D1a55bcC2695C58ba16FB37d819B0A4dc';
   const [tools, setTools] = useState<Array<{ id: string; name: string; category: string; price: string; provider: { name: string } }>>([]);
   const [selectedTool, setSelectedTool] = useState<string>('');
-  const [toolInput, setToolInput] = useState('{"position":"aave-wbtc-2x"}');
+  const [toolInput, setToolInput] = useState(session.marketplaceInput ?? '{"position":"aave-wbtc-2x"}');
   const [lastExec, setLastExec] = useState<string | null>(null);
 
   const seed = () =>
@@ -494,7 +517,7 @@ export function StepMarketplace(props: StepProps) {
             </Select>
           </Field>
           <Field label="Input (JSON)">
-            <Input value={toolInput} onChange={(e) => setToolInput(e.target.value)} />
+            <Input value={toolInput} onChange={(e) => { setToolInput(e.target.value); persist({ ...session, marketplaceInput: e.target.value }); }} />
           </Field>
           <Button disabled={busy !== null || !session.agentId} onClick={execute}>
             {busy ? 'Working…' : 'Execute & pay'}

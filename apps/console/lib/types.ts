@@ -60,6 +60,9 @@ export interface Session {
   lastToolExecution?: { id: string; name: string; price: string; txHash?: string; output?: string };
   payeeAgent?: { id: string; address: string };
   userWallet?: string;
+  spendForm?: { amount: string; category: string; counterparty: string };
+  fundAmount?: string;
+  marketplaceInput?: string;
 }
 
 export const EMPTY_SESSION: Session = {
