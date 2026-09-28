@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ConsoleClient } from '../lib/client';
 import { connectWallet, ensureSepolia, hasWallet, sendNative, sendUsdc, shortAddress } from '../lib/wallet';
 import type { Session, SpendRecord } from '../lib/types';
@@ -551,6 +551,24 @@ export function StepSettle(props: StepProps) {
   const { session, client, busy, persist, run, toast } = props;
   const [cpType, setCpType] = useState<'agent' | 'tool_provider' | 'data_provider'>('agent');
 
+  // When the settle step opens, reconcile the ledger from on-chain so that any
+  // wallet funding that landed is reflected before we try to settle.
+  useEffect(() => {
+    if (!session.walletId || !session.agentId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const rec = await client.reconcileWallet(session.walletId!);
+        if (!cancelled) persist(await refresh({ ...session, balances: rec.balances }));
+      } catch {
+        /* ignore */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [session.walletId]);
+
   const refresh = (s: Session) =>
     client.getWallet(s.agentId).then((w) => ({ ...s, balances: w.wallets[0]?.balances ?? [] }));
 
@@ -664,6 +682,13 @@ export function StepSettle(props: StepProps) {
         <span className="pill warn">single-use · 30s expiry</span> If the token expired while you read this, the
         console mints a fresh one automatically and retries.
       </p>
+      {session.balances.find((b) => b.token === 'USDC' && Number(b.amount) <= 0) && (
+        <p className="section-hint">
+          <span className="pill bad">wallet empty</span> This agent has <b>0 USDC</b> — fund it in <b>Step 2</b>. The{' '}
+          <b>Dev faucet</b> is the most reliable (credits USDC + ETH gas); wallet funding works too once the popup
+          transactions confirm.
+        </p>
+      )}
 
       <div className="card-title" style={{ marginTop: 6 }}>
         <h3>Recipient</h3>
