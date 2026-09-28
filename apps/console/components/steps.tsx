@@ -117,7 +117,14 @@ export function StepWallet(props: StepProps) {
   const fund = () =>
     run(`fund USDC ${fundAmount}`, async () => {
       if (!session.walletId) throw new Error('provision a wallet first');
-      await client.creditWallet(session.walletId, 'USDC', fundAmount);
+      try {
+        await client.creditWallet(session.walletId, 'USDC', fundAmount);
+      } catch (err) {
+        if ((err as { status?: number }).status === 404) {
+          throw new Error('This wallet no longer exists in the backend (data was reset). Click "Reset session" in the sidebar and start fresh.', { cause: err });
+        }
+        throw err;
+      }
       persist(await refresh(session));
       toast('ok', `Credited ${fundAmount} USDC`);
     });

@@ -35,8 +35,9 @@ function isDone(s: Session, key: StepKey): boolean {
 }
 
 let toastId = 0;
-let logId = 0;
 const UI_KEY = 'agentos-console';
+
+const nextId = () => `${Date.now().toString(36)}-${(++toastId).toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
 
 export default function Page() {
   const gateway = process.env.NEXT_PUBLIC_GATEWAY_URL ?? 'http://localhost:4000';
@@ -50,22 +51,46 @@ export default function Page() {
   const [restored, setRestored] = useState(false);
 
   // Restore the full UI state (session + active step + activity feed) after refresh.
+  // If the restored agent no longer exists in the backend (e.g. the DB was reset),
+  // clear the stale session automatically so the user starts fresh instead of 404ing.
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem(UI_KEY);
-      if (raw) {
-        const saved = JSON.parse(raw) as { session?: Session; active?: StepKey; feed?: LogEntry[] };
-        if (saved.session) {
-          setSession(saved.session);
-          if (saved.session.agentId && saved.session.signingKeyPem) client.setAgent(saved.session.agentId, saved.session.signingKeyPem);
+    let cancelled = false;
+    (async () => {
+      try {
+        const raw = localStorage.getItem(UI_KEY);
+        if (raw) {
+          const saved = JSON.parse(raw) as { session?: Session; active?: StepKey; feed?: LogEntry[] };
+          if (saved.session?.agentId && saved.session.signingKeyPem) {
+            client.setAgent(saved.session.agentId, saved.session.signingKeyPem);
+            try {
+              await client.getAgent(saved.session.agentId);
+            } catch (err) {
+              if ((err as { status?: number }).status === 404) {
+                localStorage.removeItem(UI_KEY);
+                if (!cancelled) {
+                  setSession(EMPTY_SESSION);
+                  setActive('bootstrap');
+                  setFeed([]);
+                  setToasts((t) => [...t, { id: nextId(), kind: 'info', message: 'Previous session was wiped — starting fresh.' }]);
+                }
+                return;
+              }
+              // network/other error: keep the restored session; it's not stale.
+            }
+          }
+          if (saved.session) setSession(saved.session);
+          if (saved.active) setActive(saved.active);
+          if (saved.feed) setFeed(saved.feed);
         }
-        if (saved.active) setActive(saved.active);
-        if (saved.feed) setFeed(saved.feed);
+      } catch {
+        /* ignore */
+      } finally {
+        if (!cancelled) setRestored(true);
       }
-    } catch {
-      /* ignore */
-    }
-    setRestored(true);
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [client]);
 
   // Persist everything whenever any of it changes — a refresh restores it all.
@@ -83,13 +108,13 @@ export default function Page() {
   }, []);
 
   const toast = useCallback((kind: Toast['kind'], message: string) => {
-    const id = ++toastId;
+    const id = nextId();
     setToasts((t) => [...t, { id, kind, message }]);
     setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 4200);
   }, []);
 
   const pushLog = useCallback((kind: LogEntry['kind'], text: string) => {
-    setFeed((f) => [{ id: ++logId, kind, text }, ...f].slice(0, 60));
+    setFeed((f) => [{ id: nextId(), kind, text }, ...f].slice(0, 60));
   }, []);
 
   const run: StepProps['run'] = useCallback(

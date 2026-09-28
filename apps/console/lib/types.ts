@@ -77,14 +77,14 @@ export const EMPTY_SESSION: Session = {
 };
 
 export interface Toast {
-  id: number;
+  id: string;
   kind: 'ok' | 'error' | 'info';
   message: string;
 }
 
 export type LogKind = 'in' | 'ok' | 'err';
 export interface LogEntry {
-  id: number;
+  id: string;
   kind: LogKind;
   text: string;
 }

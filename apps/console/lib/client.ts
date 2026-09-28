@@ -87,6 +87,10 @@ export class ConsoleClient {
     });
   }
 
+  getAgent(id: string) {
+    return this.request<{ agent: { id: string; status: string } }>(`GET`, `/v1/agents/${id}`, undefined, { signed: false });
+  }
+
   // Agent-authenticated
   provisionWallet(agentId: string, chain: string) {
     return this.request<{ wallet: { id: string; address: string } }>('POST', '/v1/wallets', { agent_id: agentId, chain });
