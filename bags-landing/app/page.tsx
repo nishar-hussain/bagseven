@@ -131,8 +131,8 @@ export default function Home() {
 
       {/* Hero */}
       <section className="relative flex items-center min-h-screen">
-        <div className="max-w-7xl mx-auto px-6 pt-24">
-          <div className="max-w-3xl fade-in">
+        <div className="max-w-7xl mx-auto px-6 pt-24 grid gap-16 lg:grid-cols-2 items-center">
+          <div className="fade-in">
             <div className="flex items-center gap-2 text-emerald-300 text-sm font-medium mb-6">
               <Sparkles className="w-4 h-4" />
               Infrastructure for autonomous AI agents
@@ -140,38 +140,81 @@ export default function Home() {
             <h1 className="font-serif text-4xl lg:text-6xl font-normal tracking-tight leading-tight mb-8">
               The trust &amp; settlement layer for <em className="text-emerald-300 not-italic">autonomous AI agents</em>
             </h1>
-            <p className="text-gray-300 text-lg lg:text-xl font-light leading-relaxed mb-12 max-w-xl">
+            <p className="text-gray-300 text-lg lg:text-xl font-light leading-relaxed mb-10 max-w-xl">
               Identity, policy, treasury, and marketplaces — so an agent can act, pay, and improve itself, while a
-              human stays in ultimate control. The planner proposes; deterministic code disposes.
+              human stays in ultimate control.
             </p>
             <div className="flex flex-wrap gap-4">
               <Link
                 href={CONSOLE_URL}
                 target="_blank"
-                className="rounded-lg bg-emerald-400 text-black font-medium px-6 py-3 text-base hover:bg-emerald-300 hover:scale-[1.02] transition-all duration-300"
+                className="rounded-lg bg-emerald-400 text-black font-medium px-7 py-3 text-base hover:bg-emerald-300 hover:scale-[1.02] transition-all duration-300"
               >
                 Get Started <ArrowRight className="inline w-4 h-4 ml-1" />
               </Link>
               <a
                 href="#platform"
-                className="rounded-lg border border-white/25 text-white font-medium px-6 py-3 text-base hover:bg-white/10 transition-colors"
+                className="rounded-lg border border-white/25 text-white font-medium px-7 py-3 text-base hover:bg-white/10 transition-colors"
               >
-                Explore the platform
+                Explore
               </a>
             </div>
+          </div>
 
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-6 mt-16 text-center sm:text-left">
-              {[
-                ['5', 'subsystems'],
-                ['0', 'policy bypasses'],
-                ['100%', 'on-chain settlement'],
-                ['immutable', 'receipts'],
-              ].map(([v, l]) => (
-                <div key={l}>
-                  <div className="text-2xl lg:text-3xl font-bold text-emerald-300">{v}</div>
-                  <div className="text-sm text-white/60">{l}</div>
+          {/* Animated hero visual — floating platform cards */}
+          <div className="relative h-[420px] lg:h-[520px] hidden sm:block">
+            {/* glowing core */}
+            <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-64 h-64 rounded-full bg-emerald-400/20 blur-3xl animate-glow" />
+            <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-72 h-72 rounded-full border border-emerald-400/20 animate-spin-slow" style={{ borderStyle: 'dashed' }} />
+
+            {/* spend token card */}
+            <div className="absolute left-0 top-8 w-64 rounded-2xl border border-white/10 bg-white/[0.04] backdrop-blur p-5 animate-floaty">
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-xs text-white/40 font-mono">spend_token</span>
+                <span className="text-[10px] font-medium rounded-full bg-emerald-400/20 text-emerald-300 px-2 py-0.5">allow</span>
+              </div>
+              <div className="font-mono text-[10px] text-white/60 leading-relaxed break-all">
+                v1.eyJ2IjoxLCJhZ2VudF9pZC...
+              </div>
+              <div className="mt-3 h-1.5 w-full rounded-full bg-white/10 overflow-hidden">
+                <div className="h-full w-3/4 rounded-full bg-emerald-400/70" />
+              </div>
+            </div>
+
+            {/* balance card */}
+            <div className="absolute right-0 top-16 w-60 rounded-2xl border border-white/10 bg-white/[0.04] backdrop-blur p-5 animate-floaty-2">
+              <div className="flex items-center gap-2 mb-3">
+                <div className="w-8 h-8 rounded-lg bg-white/10 flex items-center justify-center">
+                  <Wallet className="w-4 h-4 text-emerald-300" />
                 </div>
-              ))}
+                <span className="text-xs text-white/40">USDC balance</span>
+              </div>
+              <div className="text-2xl font-bold tracking-tight">$1,240.00</div>
+              <div className="text-[11px] text-white/40 mt-1">reserved $80.00</div>
+            </div>
+
+            {/* receipt card */}
+            <div className="absolute left-10 bottom-10 w-56 rounded-2xl border border-white/10 bg-white/[0.04] backdrop-blur p-5 animate-floaty-3">
+              <div className="flex items-center gap-2 mb-2">
+                <div className="w-8 h-8 rounded-lg bg-white/10 flex items-center justify-center">
+                  <ReceiptText className="w-4 h-4 text-emerald-300" />
+                </div>
+                <span className="text-xs text-white/40">receipt</span>
+              </div>
+              <div className="font-mono text-[10px] text-white/60">0x8f3a…c2e1 ✓</div>
+              <div className="text-[11px] text-emerald-300 mt-2">immutable · on-chain</div>
+            </div>
+
+            {/* policy pill */}
+            <div className="absolute right-6 bottom-16 flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.05] backdrop-blur px-4 py-2 animate-floaty-2">
+              <FileCheck2 className="w-4 h-4 text-emerald-300" />
+              <span className="text-xs text-white/70">policy v3 · within budget</span>
+            </div>
+
+            {/* status chip */}
+            <div className="absolute left-1/2 -translate-x-1/2 -bottom-2 flex items-center gap-2 rounded-full bg-emerald-400 text-black px-4 py-2 animate-floaty">
+              <span className="w-1.5 h-1.5 rounded-full bg-black animate-pulse" />
+              <span className="text-xs font-medium">agent active · settled on-chain</span>
             </div>
           </div>
         </div>
