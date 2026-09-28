@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { ConsoleClient } from '../lib/client';
+import { connectWallet, ensureSepolia, hasWallet, sendUsdc, shortAddress } from '../lib/wallet';
 import type { Session, SpendRecord } from '../lib/types';
 import { Button, Card, CodeBlock, Copy, Field, Input, KV, Pill, Select, StatusPill } from './ui';
 
@@ -96,7 +97,7 @@ export function StepBootstrap(props: StepProps) {
 
 export function StepWallet(props: StepProps) {
   const { session, client, busy, persist, run, toast, onNext } = props;
-  const [fundAmount, setFundAmount] = useState('100.00');
+  const [fundAmount, setFundAmount] = useState('10.00');
 
   const refresh = (s: Session) =>
     client.getWallet(s.agentId).then((w) => {
@@ -114,6 +115,29 @@ export function StepWallet(props: StepProps) {
       if (!session.walletId) onNext();
     });
 
+  const connect = () =>
+    run('connect my wallet', async () => {
+      if (!hasWallet()) throw new Error('No browser wallet (MetaMask) detected — install it, or use the dev faucet below.');
+      const address = await connectWallet();
+      await ensureSepolia();
+      persist({ ...session, userWallet: address });
+      toast('ok', `Connected ${shortAddress(address)}`);
+    });
+
+  // Fund from the USER's own wallet via a wallet popup: USDC is deducted from the
+  // connected wallet and sent to the agent's wallet on-chain, then the ledger is
+  // reconciled with what actually arrived.
+  const fundFromWallet = () =>
+    run(`fund ${fundAmount} USDC from my wallet`, async () => {
+      if (!session.walletId) throw new Error('provision a wallet first');
+      if (!session.userWallet) throw new Error('connect your wallet first');
+      const txHash = await sendUsdc(session.userWallet, session.walletAddress!, fundAmount);
+      await new Promise((r) => setTimeout(r, 3000)); // allow the tx to confirm
+      const reconciled = await client.reconcileWallet(session.walletId);
+      persist(await refresh({ ...session, balances: reconciled.balances }));
+      toast('ok', `Sent ${fundAmount} USDC from your wallet — tx ${txHash.slice(0, 12)}…`);
+    });
+
   const fund = () =>
     run(`fund USDC ${fundAmount}`, async () => {
       if (!session.walletId) throw new Error('provision a wallet first');
@@ -126,14 +150,14 @@ export function StepWallet(props: StepProps) {
         throw err;
       }
       persist(await refresh(session));
-      toast('ok', `Credited ${fundAmount} USDC`);
+      toast('ok', `Credited ${fundAmount} USDC (dev faucet)`);
     });
 
   return (
     <Card title="Wallet & funds" action={<AgentBar session={session} />}>
       <p className="section-hint">
-        Provisions a treasury wallet on <code>sepolia</code> (dev signer) and credits test USDC via the dev
-        faucet. The wallet is the only place an agent can hold funds.
+        Provisions a treasury wallet on <code>sepolia</code> for the agent. Fund it <b>from your own wallet</b> — a
+        popup asks you to approve the USDC transfer — or use the dev faucet to test.
       </p>
       {!session.walletId ? (
         <Button disabled={busy !== null} onClick={provision}>
@@ -141,19 +165,35 @@ export function StepWallet(props: StepProps) {
         </Button>
       ) : (
         <>
-          <div className="grid-2">
+          <div className="grid-3">
             <Field label="Fund amount (USDC)">
               <Input value={fundAmount} onChange={(e) => setFundAmount(e.target.value)} />
             </Field>
             <div className="flex" style={{ alignItems: 'flex-end' }}>
-              <Button disabled={busy !== null} onClick={fund}>
-                {busy ? 'Working…' : 'Credit (dev faucet)'}
+              {session.userWallet ? (
+                <Button disabled={busy !== null} onClick={fundFromWallet}>
+                  {busy ? 'Working…' : `Send ${fundAmount} USDC from my wallet`}
+                </Button>
+              ) : (
+                <Button disabled={busy !== null} onClick={connect}>
+                  {busy ? 'Working…' : 'Connect my wallet'}
+                </Button>
+              )}
+            </div>
+            <div className="flex" style={{ alignItems: 'flex-end' }}>
+              <Button variant="ghost" disabled={busy !== null} onClick={fund}>
+                {busy ? 'Working…' : 'Dev faucet'}
               </Button>
             </div>
           </div>
           <CodeBlock>
             wallet_id  {session.walletId} <Copy value={session.walletId} />
             {'\n'}address    {session.walletAddress}
+            {session.userWallet && (
+              <>
+                {'\n'}user wallet {shortAddress(session.userWallet)} <Copy value={session.userWallet} />
+              </>
+            )}
             {session.balances.map((b) => (
               <span key={b.token}>
                 {'\n'}{b.token}: {b.amount} <span className="muted">(reserved {b.reservedAmount})</span>

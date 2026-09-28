@@ -98,6 +98,9 @@ export class ConsoleClient {
   creditWallet(walletId: string, token: string, amount: string) {
     return this.request<{ balance: { amount: string } }>('POST', `/v1/wallets/${walletId}/credit`, { token, amount });
   }
+  reconcileWallet(walletId: string) {
+    return this.request<{ wallet_id: string; balances: Array<{ token: string; amount: string; reservedAmount: string }> }>('POST', `/v1/wallets/${walletId}/reconcile`);
+  }
   getWallet(agentId: string) {
     return this.request<{ wallets: Array<{ wallet: { id: string; chain: string; address: string }; balances: Array<{ token: string; amount: string; reservedAmount: string }> }> }>(`GET`, `/v1/wallets/${agentId}`);
   }

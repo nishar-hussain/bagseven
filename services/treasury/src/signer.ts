@@ -28,6 +28,8 @@ export interface Signer {
   }>;
   /** Transfer the agent's full on-chain balance (USDC + native) to a target address. */
   sweep(agentId: string, to: string): Promise<{ usdcTxHash?: string; ethTxHash?: string }>;
+  /** Raw on-chain balance for an address/token (for ledger reconciliation), or null if not readable. */
+  getBalance?(address: string, token: string): Promise<bigint | null>;
 }
 
 export class DevSigner implements Signer {
@@ -55,6 +57,10 @@ export class DevSigner implements Signer {
 
   async sweep(agentId: string, to: string): Promise<{ usdcTxHash?: string; ethTxHash?: string }> {
     return { usdcTxHash: `0x${createHash('sha256').update(`sweep:${agentId}:${to}:${Date.now()}`).digest('hex')}` };
+  }
+
+  async getBalance(): Promise<bigint | null> {
+    return null; // dev signer has no chain
   }
 }
 
@@ -203,6 +209,22 @@ export class RealEoaSigner implements Signer {
     }
 
     return result;
+  }
+
+  /** Reads the real on-chain balance (raw units) for ledger reconciliation. */
+  async getBalance(address: string, token: string): Promise<bigint | null> {
+    if (token === 'USDC') {
+      return (await this.publicClient.readContract({
+        address: this.spec.usdcAddress,
+        abi: erc20Abi,
+        functionName: 'balanceOf',
+        args: [address as Address],
+      })) as bigint;
+    }
+    if (token === 'ETH') {
+      return this.publicClient.getBalance({ address: address as Address });
+    }
+    return null;
   }
 }
 

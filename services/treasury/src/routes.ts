@@ -157,6 +157,41 @@ export function buildTreasuryRoutes(app: FastifyInstance, { db, redis, config }:
     return { wallets: rows };
   });
 
+  // Reconcile the off-chain ledger with the wallet's actual on-chain balance.
+  // Used after a user funds the agent directly from their own wallet (popup
+  // transfer): the ledger is set to match what is really on the agent's address.
+  app.post('/v1/wallets/:id/reconcile', async (req) => {
+    const { id } = req.params as { id: string };
+    const wallet = await db.query.wallets.findFirst({ where: eq(wallets.id, id) });
+    if (!wallet) throw new ApiError(404, 'NOT_FOUND', 'wallet not found');
+
+    const signer = getSigner(wallet.chain);
+    if (typeof signer.getBalance !== 'function') {
+      return { wallet_id: id, balances: await db.select().from(balances).where(eq(balances.walletId, id)) };
+    }
+
+    const formatUnits = (units: bigint, decimals: number): string => {
+      const div = 10n ** BigInt(decimals);
+      const int = units / div;
+      const frac = (units % div).toString().padStart(decimals, '0').replace(/0+$/, '');
+      return frac ? `${int}.${frac}` : `${int}`;
+    };
+
+    const rows = await db.select().from(balances).where(eq(balances.walletId, id));
+    for (const b of rows) {
+      const onChain = await signer.getBalance(wallet.address, b.token);
+      if (onChain === null) continue;
+      const decimals = b.token === 'USDC' ? 6 : 18;
+      await db
+        .update(balances)
+        .set({ amount: formatUnits(onChain, decimals), lastReconciledAt: new Date() })
+        .where(and(eq(balances.walletId, id), eq(balances.token, b.token)));
+    }
+
+    const updated = await db.select().from(balances).where(eq(balances.walletId, id));
+    return { wallet_id: id, balances: updated };
+  });
+
   // D1: reserve funds only after a valid spend_token. Fail-closed on any mismatch.
   app.post('/v1/reservations', async (req) => {
     const body = reserveSchema.parse(req.body);

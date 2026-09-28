@@ -227,6 +227,13 @@ export class Client {
     }>;
   }
 
+  reconcileWallet(walletId: string): Promise<{ wallet_id: string; balances: Array<{ token: string; amount: string; reservedAmount: string }> }> {
+    return this.request('POST', `/v1/wallets/${walletId}/reconcile`) as Promise<{
+      wallet_id: string;
+      balances: Array<{ token: string; amount: string; reservedAmount: string }>;
+    }>;
+  }
+
   compensate(input: { decision_id: string; agent_id: string; amount: string; category: string; include_monthly?: boolean }): Promise<{ applied: boolean }> {
     return this.request('POST', '/v1/compensations', { include_monthly: true, ...input }) as Promise<{ applied: boolean }>;
   }
