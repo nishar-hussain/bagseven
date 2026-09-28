@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { ConsoleClient } from '../lib/client';
-import { connectWallet, ensureSepolia, hasWallet, sendUsdc, shortAddress } from '../lib/wallet';
+import { connectWallet, ensureSepolia, hasWallet, sendNative, sendUsdc, shortAddress } from '../lib/wallet';
 import type { Session, SpendRecord } from '../lib/types';
 import { Button, Card, CodeBlock, Copy, Field, Input, KV, Pill, Select, StatusPill } from './ui';
 
@@ -137,8 +137,17 @@ export function StepWallet(props: StepProps) {
     run(`fund ${fundAmount} USDC from my wallet`, async () => {
       if (!session.walletId) throw new Error('provision a wallet first');
       if (!session.userWallet) throw new Error('connect your wallet first');
+      const gasEth = process.env.NEXT_PUBLIC_GAS_GRANT_ETH ?? '0.01';
       const txHash = await sendUsdc(session.userWallet, session.walletAddress!, fundAmount);
-      toast('info', `Transaction sent — waiting for on-chain confirmation…`);
+      // The agent wallet also needs ETH to pay for its own settlements — send a
+      // small gas grant (a second popup) so Reserve & Commit doesn't fail on gas.
+      let gasTxHash: string | undefined;
+      try {
+        gasTxHash = await sendNative(session.userWallet, session.walletAddress!, gasEth);
+      } catch {
+        // user declined the gas grant — settlement may still work if the agent has ETH
+      }
+      toast('info', 'Transactions sent — waiting for on-chain confirmation…');
       let reconciled: { balances: Array<{ token: string; amount: string; reservedAmount: string }> } | null = null;
       for (let i = 0; i < 30; i++) {
         await new Promise((r) => setTimeout(r, 4000));
@@ -149,9 +158,9 @@ export function StepWallet(props: StepProps) {
       persist(await refresh({ ...session, balances: reconciled?.balances ?? session.balances }));
       const usdcNow = (reconciled?.balances ?? session.balances).find((b) => b.token === 'USDC');
       if (usdcNow && Number(usdcNow.amount) >= Number(fundAmount)) {
-        toast('ok', `Sent ${fundAmount} USDC from your wallet — tx ${txHash.slice(0, 12)}…`);
+        toast('ok', `Sent ${fundAmount} USDC (+ ${gasEth} ETH gas) from your wallet — tx ${txHash.slice(0, 12)}…${gasTxHash ? ' + ' + gasTxHash.slice(0, 12) : ''}`);
       } else {
-        toast('info', `Tx ${txHash.slice(0, 12)}… sent but not yet confirmed — re-run "Send" or reconcile again shortly.`);
+        toast('info', `Tx ${txHash.slice(0, 12)}… sent but not yet confirmed — reconcile again shortly.`);
       }
     });
 

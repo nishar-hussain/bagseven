@@ -83,6 +83,22 @@ export async function sendUsdc(from: string, to: string, amount: string): Promis
   return txHash;
 }
 
+/**
+ * Sends a small native ETH gas grant to the agent's wallet so it can pay for its
+ * own settlement transactions. Opens one more wallet popup.
+ */
+export async function sendNative(from: string, to: string, amountEth: string): Promise<string> {
+  const eth = window.ethereum;
+  if (!eth) throw new Error('No browser wallet found');
+  await ensureSepolia();
+  const value = BigInt(Math.round(Number(amountEth) * 1e18));
+  const txHash = (await eth.request({
+    method: 'eth_sendTransaction',
+    params: [{ from, to, value: `0x${value.toString(16)}` }],
+  })) as string;
+  return txHash;
+}
+
 export function shortAddress(a: string): string {
   return a ? `${a.slice(0, 6)}…${a.slice(-4)}` : '';
 }
