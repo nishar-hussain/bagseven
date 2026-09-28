@@ -5,9 +5,9 @@ import { ConsoleClient } from '../lib/client';
 import { EMPTY_SESSION, type Session, type Toast } from '../lib/types';
 import { Sidebar } from '../components/dashboard/sidebar';
 import { Header } from '../components/dashboard/header';
-import { OverviewSection, IdentitySection, WalletSection, PolicySection, SpendSection, SettleSection, MarketplaceSection, ActivitySection, SettingsSection } from '../components/dashboard/sections';
+import { OverviewSection, IdentitySection, TreasurySection, SettleSection, MarketplaceSection, ActivitySection, SettingsSection } from '../components/dashboard/sections';
 
-export type Section = 'overview' | 'identity' | 'wallet' | 'policy' | 'spend' | 'settle' | 'marketplace' | 'activity' | 'settings';
+export type Section = 'overview' | 'identity' | 'treasury' | 'settle' | 'marketplace' | 'activity' | 'settings';
 
 let toastId = 0;
 const UI_KEY = 'agentos-console';
@@ -98,9 +98,7 @@ export default function Page() {
           <div key={activeSection} className="animate-in fade-in slide-in-from-bottom-4 duration-500">
             {activeSection === 'overview' && <OverviewSection {...sectionProps} />}
             {activeSection === 'identity' && <IdentitySection {...sectionProps} />}
-            {activeSection === 'wallet' && <WalletSection {...sectionProps} />}
-            {activeSection === 'policy' && <PolicySection {...sectionProps} />}
-            {activeSection === 'spend' && <SpendSection {...sectionProps} />}
+            {activeSection === 'treasury' && <TreasurySection {...sectionProps} />}
             {activeSection === 'settle' && <SettleSection {...sectionProps} />}
             {activeSection === 'marketplace' && <MarketplaceSection {...sectionProps} />}
             {activeSection === 'activity' && <ActivitySection {...sectionProps} />}

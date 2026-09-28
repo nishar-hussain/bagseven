@@ -1,7 +1,7 @@
 'use client';
 
 import { cn } from '../../lib/utils';
-import { LayoutDashboard, ShieldCheck, Wallet, FileCheck2, Coins, Send, Store, Activity, Settings, ChevronLeft, ChevronRight } from 'lucide-react';
+import { LayoutDashboard, ShieldCheck, Wallet, Send, Store, Activity, Settings, ChevronLeft, ChevronRight } from 'lucide-react';
 
 function PaperBagIcon({ className }: { className?: string }) {
   return (
@@ -63,9 +63,7 @@ interface SidebarProps {
 const navItems: { id: Section; label: string; icon: React.ElementType; group?: string }[] = [
   { id: 'overview', label: 'Overview', icon: LayoutDashboard },
   { id: 'identity', label: 'Identity', icon: ShieldCheck },
-  { id: 'wallet', label: 'Wallet & Funds', icon: Wallet },
-  { id: 'policy', label: 'Policy', icon: FileCheck2 },
-  { id: 'spend', label: 'Spend Intents', icon: Coins },
+  { id: 'treasury', label: 'Treasury', icon: Wallet },
   { id: 'settle', label: 'Reserve & Settle', icon: Send },
   { id: 'marketplace', label: 'Marketplace', icon: Store },
   { id: 'activity', label: 'Activity', icon: Activity },

@@ -13,6 +13,7 @@ import { Badge } from '../ui/badge';
 import { Separator } from '../ui/separator';
 import { Alert, AlertDescription, AlertTitle } from '../ui/alert';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../ui/table';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
 import { MetricCard } from './metric-card';
 import {
   ShieldCheck,
@@ -96,7 +97,7 @@ export function OverviewSection(props: SectionProps) {
       {!session.agentId && (
         <Alert>
           <AlertTitle>Get started</AlertTitle>
-          <AlertDescription>Go to <b>Identity</b> to create an agent, then fund it in <b>Wallet &amp; Funds</b>, publish a <b>Policy</b>, and try a <b>Spend Intent</b>.</AlertDescription>
+          <AlertDescription>Go to <b>Identity</b> to create an agent, then use the <b>Treasury</b> to fund the wallet, set policy, and propose spends.</AlertDescription>
         </Alert>
       )}
     </div>
@@ -441,6 +442,29 @@ export function SpendSection(props: SectionProps) {
   );
 }
 
+/* ─────────────────────────── TREASURY (merged) ─────────────────────────── */
+
+export function TreasurySection(props: SectionProps) {
+  return (
+    <Tabs defaultValue="wallet" className="gap-4">
+      <TabsList className="h-auto w-fit gap-1 p-1">
+        <TabsTrigger value="wallet">Wallet &amp; Funds</TabsTrigger>
+        <TabsTrigger value="policy">Policy</TabsTrigger>
+        <TabsTrigger value="spend">Spend Intents</TabsTrigger>
+      </TabsList>
+      <TabsContent value="wallet" className="mt-4">
+        <WalletSection {...props} />
+      </TabsContent>
+      <TabsContent value="policy" className="mt-4">
+        <PolicySection {...props} />
+      </TabsContent>
+      <TabsContent value="spend" className="mt-4">
+        <SpendSection {...props} />
+      </TabsContent>
+    </Tabs>
+  );
+}
+
 /* ─────────────────────────── SETTLE ─────────────────────────── */
 
 export function SettleSection(props: SectionProps) {
@@ -479,7 +503,7 @@ export function SettleSection(props: SectionProps) {
       res = await client.reserve({ wallet_id: session.walletId, token: 'USDC', amount: decision.amount, spend_token: token, counterparty_id: decision.counterparty_id, counterparty_type: cpType }, `reserve-${Date.now()}`);
     } catch (err) {
       const e = err as { code?: string; status?: number };
-      if (e.code === 'INSUFFICIENT_FUNDS') throw new Error('Wallet has no USDC — fund it in Wallet & Funds (Dev faucet is reliable).', { cause: err });
+      if (e.code === 'INSUFFICIENT_FUNDS') throw new Error('Wallet has no USDC — fund it in Treasury → Wallet & Funds (Dev faucet is reliable).', { cause: err });
       if (e.code === 'UNRESOLVABLE_PAYEE') throw new Error('That spend has no real recipient — create a payee, re-propose to it in Spend, then settle.', { cause: err });
       if (e.status === 404) throw new Error('Stale session — click Reset in Settings.', { cause: err });
       throw err;
@@ -515,7 +539,7 @@ export function SettleSection(props: SectionProps) {
   return (
     <div className="space-y-6">
       {usdcEmpty && (
-        <Alert variant="warning"><AlertTitle>Wallet empty</AlertTitle><AlertDescription>This agent has no USDC — fund it in Wallet &amp; Funds (the Dev faucet is reliable).</AlertDescription></Alert>
+        <Alert variant="warning"><AlertTitle>Wallet empty</AlertTitle><AlertDescription>This agent has no USDC — fund it in Treasury → Wallet & Funds (the Dev faucet is reliable).</AlertDescription></Alert>
       )}
       <div className="grid gap-6 lg:grid-cols-2">
         <Card>
