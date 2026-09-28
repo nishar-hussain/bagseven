@@ -611,7 +611,20 @@ interface MarketTool {
   description: string | null;
   category: string;
   price: string;
+  inputSchema?: Record<string, unknown> | null;
   provider: { id: string; name: string };
+}
+
+interface ArgProp {
+  type?: string;
+  enum?: string[];
+  description?: string;
+}
+
+function fieldChoices(p: ArgProp | undefined): string[] | null {
+  if (p?.enum?.length) return p.enum;
+  const parts = (p?.description ?? '').split('|').map((s) => s.trim()).filter(Boolean);
+  return parts.length > 1 ? parts : null;
 }
 
 function buildSchema(inputs: string): Record<string, unknown> {
@@ -648,6 +661,7 @@ export function MarketplaceSection(props: SectionProps) {
   const [query, setQuery] = useState('');
   const [category, setCategory] = useState('all');
   const [selectedToolId, setSelectedToolId] = useState('');
+  const [args, setArgs] = useState<Record<string, string>>({});
   const [toolInput, setToolInput] = useState(session.marketplaceInput ?? '{"asset":"USDC","chain":"ethereum"}');
   const [tab, setTab] = useState('browse');
   const [step, setStep] = useState<ListStep>('start');
@@ -657,10 +671,18 @@ export function MarketplaceSection(props: SectionProps) {
   const [describe, setDescribe] = useState({ providerName: 'My API', payout: '', name: '', category: 'general', newCategory: '', description: '', inputs: '', price: '0.10', contact: '' });
   const [providerToken, setProviderToken] = useState('');
 
+  const pickTool = (id: string, from?: MarketTool[]) => {
+    const t = (from ?? tools).find((x) => x.id === id);
+    const props = (((t?.inputSchema ?? {}) as { properties?: Record<string, ArgProp> }).properties) ?? {};
+    setSelectedToolId(id);
+    setArgs(Object.fromEntries(Object.entries(props).map(([k, p]) => [k, p.enum?.[0] ?? ''])));
+  };
+
   const loadTools = async (msg?: string) => {
     const disc = await client.listTools({});
     setTools(disc.tools);
-    setSelectedToolId((cur) => (cur && disc.tools.some((t) => t.id === cur) ? cur : (disc.tools[0]?.id ?? '')));
+    const keep = selectedToolId && disc.tools.some((t) => t.id === selectedToolId);
+    pickTool(keep ? selectedToolId : (disc.tools[0]?.id ?? ''), disc.tools);
     if (msg) toast('info', msg);
   };
 
@@ -670,19 +692,35 @@ export function MarketplaceSection(props: SectionProps) {
     run('seed demo marketplace', async () => {
       const provider = await client.registerProvider({ name: 'Demo Data Provider', payout_wallet_address: demoPayout, payout_chain: 'sepolia' });
       await client.approveProvider(provider.provider_id);
-      await client.createTool(provider.provider_token, { provider_id: provider.provider_id, name: 'liquidation-risk', description: 'Returns liquidation risk score for a position', category: 'trading', price: '0.10', price_token: 'USDC', endpoint_url: `${demoUrl}/v1/exec` });
+      await client.createTool(provider.provider_token, { provider_id: provider.provider_id, name: 'liquidation-risk', description: 'Returns liquidation risk score for a position', category: 'trading', price: '0.10', price_token: 'USDC', endpoint_url: `${demoUrl}/v1/exec`, input_schema: { type: 'object', properties: { position: { type: 'string', description: 'Position to score, e.g. aave-wbtc-2x' }, chain: { type: 'string', enum: ['ethereum', 'base', 'arbitrum'], description: 'Chain to search' } }, required: ['position'] } });
       await loadTools('Demo provider + tool seeded');
     });
 
   const execute = () =>
     run('execute paid tool', async () => {
-      if (!session.agentId) throw new Error('create an agent first');
       if (!selectedToolId) throw new Error('pick a tool first');
-      let input: Record<string, unknown>;
-      try { input = JSON.parse(toolInput); } catch { throw new Error('tool input must be valid JSON'); }
       const tool = tools.find((t) => t.id === selectedToolId)!;
-      const res = await client.executeTool(selectedToolId, session.agentId, input, `tool-${Date.now()}`);
-      persist({ ...session, toolExecutions: (session.toolExecutions ?? 0) + 1, lastToolExecution: { id: res.execution_id, name: tool.name, price: res.price_paid, txHash: res.tx_hash, output: JSON.stringify(res.output) }, marketplaceInput: toolInput });
+      let agentId = session.agentId;
+      let patch: Partial<Session> = {};
+      if (!agentId) {
+        const org = await client.createOrg('Demo Org');
+        const guardian = await client.createGuardian({ type: 'human', org_id: org.organization.id });
+        const agent = await client.createAgent({ owner_org_id: org.organization.id, guardian_id: guardian.guardian.id, display_name: 'Demo Agent', capabilities: ['trading', 'data-purchase'] });
+        await client.confirmAgent(agent.agent_id, guardian.guardian_token);
+        client.setAgent(agent.agent_id, agent.signing_private_key_pem);
+        const w = await client.provisionWallet(agent.agent_id, 'sepolia');
+        await client.creditWallet(w.wallet.id, 'USDC', '10.00');
+        await client.createPolicy({ agent_id: agent.agent_id, daily_budget: '10.00', max_transaction: '10.00', allowed_chains: ['sepolia'], allowed_categories: ['trading', 'data-purchase'], category_limits: {}, human_approval_threshold: '100.00', created_by: 'console' });
+        patch = { orgId: org.organization.id, orgName: 'Demo Org', guardianId: guardian.guardian.id, guardianToken: guardian.guardian_token, agentId: agent.agent_id, agentName: 'Demo Agent', apiKey: agent.api_key, signingKeyPem: agent.signing_private_key_pem, agentStatus: 'active', walletId: w.wallet.id, walletAddress: w.wallet.address, policy: { policy_id: 'demo', version: 1, daily_budget: '10.00', max_transaction: '10.00', category_limits: {}, human_approval_threshold: '100.00' } };
+        agentId = agent.agent_id;
+        toast('info', 'Demo agent provisioned — funded with testnet USDC');
+      }
+      let input: Record<string, unknown>;
+      try {
+        input = Object.keys(schemaProps).length > 0 ? Object.fromEntries(Object.entries(args).map(([k, v]) => [k, v])) : JSON.parse(toolInput);
+      } catch { throw new Error('tool input must be valid JSON'); }
+      const res = await client.executeTool(selectedToolId, agentId!, input, `tool-${Date.now()}`);
+      persist({ ...session, ...patch, toolExecutions: (session.toolExecutions ?? 0) + 1, lastToolExecution: { id: res.execution_id, name: tool.name, price: res.price_paid, txHash: res.tx_hash, output: JSON.stringify(res.output) }, marketplaceInput: toolInput });
       toast('ok', `Tool "${tool.name}" executed — paid ${res.price_paid} USDC`);
     });
 
@@ -740,6 +778,7 @@ export function MarketplaceSection(props: SectionProps) {
     return (!q || hay.includes(q)) && (category === 'all' || t.category === category);
   });
   const selected = tools.find((t) => t.id === selectedToolId) ?? null;
+  const schemaProps = (((selected?.inputSchema ?? {}) as { properties?: Record<string, ArgProp> }).properties) ?? {};
   const categoryLabel = describe.category === '__new' ? (describe.newCategory.trim() || 'new category') : describe.category;
   const inputCount = describe.inputs.split('\n').map((l) => l.trim()).filter(Boolean).length;
 
@@ -782,7 +821,7 @@ export function MarketplaceSection(props: SectionProps) {
           {filtered.length > 0 ? (
             <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
               {filtered.map((t) => (
-                <Card key={t.id} className={cn('cursor-pointer transition-colors hover:border-accent/60', selectedToolId === t.id && 'border-accent')} onClick={() => setSelectedToolId(t.id)}>
+                <Card key={t.id} className={cn('cursor-pointer transition-colors hover:border-accent/60', selectedToolId === t.id && 'border-accent')} onClick={() => pickTool(t.id)}>
                   <CardHeader className="pb-2">
                     <div className="flex items-center justify-between gap-2">
                       <Badge variant="outline" className="uppercase text-[10px] tracking-wider">{t.category}</Badge>
@@ -810,38 +849,75 @@ export function MarketplaceSection(props: SectionProps) {
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2"><Zap className="size-5 text-accent" /> Playground</CardTitle>
-              <CardDescription>Pick a tool, set the arguments, run it — paid from your agent's wallet. Watch the 402 turn into an answer.</CardDescription>
+              <CardDescription>Watch an agent pay for an answer. A real x402 payment on testnet, paid from a free demo agent so you can try it without one.</CardDescription>
             </CardHeader>
-            <CardContent className="space-y-4">
+            <CardContent className="space-y-5">
+              <div className="space-y-1">
+                <p className="text-sm font-medium">Request</p>
+                <p className="text-xs text-muted-foreground">Pick a tool, adjust the arguments, run it.</p>
+              </div>
+
+              <div className="space-y-2">
+                <Label>Tool</Label>
+                <Select value={selectedToolId} onValueChange={pickTool}>
+                  <SelectTrigger className="w-full font-medium"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {tools.map((t) => <SelectItem key={t.id} value={t.id}>{t.name} · ${Number(t.price).toFixed(2)}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+                {selected && <p className="text-sm text-muted-foreground">{selected.description || 'No description.'}</p>}
+              </div>
+
               {selected ? (
-                <>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Badge variant="outline">{selected.category}</Badge>
-                    <span className="text-sm font-medium">{selected.name}</span>
-                    <Badge variant="success" className="font-mono">${Number(selected.price).toFixed(2)}</Badge>
-                    <span className="text-xs text-muted-foreground">powered by {selected.provider.name}</span>
+                Object.keys(schemaProps).length > 0 ? (
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    {Object.entries(schemaProps).map(([key, p]) => {
+                      const choices = fieldChoices(p);
+                      return (
+                        <div key={key} className="space-y-2">
+                          <Label className="font-mono text-xs">{key}</Label>
+                          {choices ? (
+                            <Select value={args[key] ?? ''} onValueChange={(v) => setArgs({ ...args, [key]: v })}>
+                              <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+                              <SelectContent>{choices.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
+                            </Select>
+                          ) : (
+                            <Input value={args[key] ?? ''} onChange={(e) => setArgs({ ...args, [key]: e.target.value })} />
+                          )}
+                          {p.description && <p className="text-xs text-muted-foreground">{p.description}</p>}
+                        </div>
+                      );
+                    })}
                   </div>
-                  <div className="space-y-2">
-                    <Label>Arguments (JSON)</Label>
-                    <Input value={toolInput} onChange={(e) => { setToolInput(e.target.value); persist({ ...session, marketplaceInput: e.target.value }); }} className="font-mono text-xs" />
-                  </div>
-                  <Button variant="accent" onClick={execute} disabled={busy !== null || !session.agentId}><Zap className="size-4" /> Run and pay ${Number(selected.price).toFixed(2)}</Button>
-                  {!session.agentId && <p className="text-xs text-muted-foreground">Create an agent to pay from its wallet.</p>}
-                </>
+                ) : (
+                  <div className="space-y-2"><Label>Arguments (JSON)</Label><Input value={toolInput} onChange={(e) => { setToolInput(e.target.value); persist({ ...session, marketplaceInput: e.target.value }); }} className="font-mono text-xs" /></div>
+                )
               ) : (
-                <p className="text-sm text-muted-foreground">Pick a tool in <b>Browse tools</b> first.</p>
+                <p className="text-sm text-muted-foreground">No tools yet — seed the demo in <b>Browse tools</b> or list your own.</p>
               )}
-              {session.lastToolExecution && (
-                <div className="space-y-2 text-sm">
-                  <Separator />
-                  <div className="flex flex-wrap gap-2">
-                    <Badge variant="success">{session.lastToolExecution.name}</Badge>
-                    <Badge variant="secondary">paid {session.lastToolExecution.price} USDC</Badge>
-                    {session.lastToolExecution.txHash && <Badge variant="muted"><Mono>{session.lastToolExecution.txHash.slice(0, 16)}…</Mono></Badge>}
-                  </div>
-                  <pre className="rounded-lg bg-muted/40 p-3 text-xs overflow-auto">{session.lastToolExecution.output}</pre>
+
+              <div className="space-y-2">
+                <Label>Pay on</Label>
+                <div className="flex items-center gap-2"><Badge variant="outline" className="px-2.5 py-1 font-mono">sepolia testnet</Badge></div>
+                <p className="text-xs text-muted-foreground">Both rails are offered in the same 402.</p>
+              </div>
+
+              {selected ? (
+                <Button variant="accent" onClick={execute} disabled={busy !== null} className="w-full sm:w-auto"><Zap className="size-4" /> Run and pay ${Number(selected.price).toFixed(2)}</Button>
+              ) : null}
+              <p className="text-xs text-muted-foreground">Funded by us — a free demo agent pays on testnet, so you do not need a wallet. Connect your own agent to pay from yours.</p>
+
+              <Separator />
+              <div className="space-y-1.5">
+                <div className="flex items-center gap-2">
+                  <Bot className="size-4 text-muted-foreground" />
+                  <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">demo agent</span>
                 </div>
-              )}
+                <p className="text-sm">{session.lastToolExecution ? `Last run: ${session.lastToolExecution.name} — paid ${session.lastToolExecution.price} USDC, 402 → answer.` : 'Nothing run yet. Press the button and watch the 402 turn into an answer.'}</p>
+                {session.lastToolExecution && (
+                  <pre className="rounded-lg bg-muted/40 p-3 text-xs overflow-auto">{session.lastToolExecution.output}</pre>
+                )}
+              </div>
             </CardContent>
           </Card>
         </TabsContent>

@@ -141,7 +141,7 @@ export class ConsoleClient {
     const q = new URLSearchParams();
     if (query.category) q.set('category', query.category);
     if (query.max_price) q.set('max_price', query.max_price);
-    return this.request<{ tools: Array<{ id: string; name: string; description: string | null; category: string; price: string; endpointUrl: string; provider: { id: string; name: string } }> }>(`GET`, `/v1/tools${q.size ? `?${q.toString()}` : ''}`, undefined, { signed: false });
+    return this.request<{ tools: Array<{ id: string; name: string; description: string | null; category: string; price: string; endpointUrl: string; inputSchema?: Record<string, unknown> | null; provider: { id: string; name: string } }> }>(`GET`, `/v1/tools${q.size ? `?${q.toString()}` : ''}`, undefined, { signed: false });
   }
   executeTool(toolId: string, agentId: string, input: Record<string, unknown>, idemKey: string) {
     return this.request<{ execution_id: string; status: string; output: unknown; price_paid: string; tx_hash?: string }>('POST', `/v1/tools/${toolId}/execute`, { agent_id: agentId, input }, { idempotencyKey: idemKey });
