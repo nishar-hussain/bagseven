@@ -37,6 +37,9 @@ import {
   PackagePlus,
   Terminal,
   Wand2,
+  ArrowLeft,
+  ArrowRight,
+  BadgeCheck,
 } from 'lucide-react';
 
 export interface SectionProps {
@@ -611,6 +614,31 @@ interface MarketTool {
   provider: { id: string; name: string };
 }
 
+function buildSchema(inputs: string): Record<string, unknown> {
+  const properties: Record<string, { type: string; description?: string }> = {};
+  const required: string[] = [];
+  for (const line of inputs.split('\n')) {
+    const l = line.trim();
+    if (!l) continue;
+    const colon = l.indexOf(':');
+    const key = (colon > 0 ? l.slice(0, colon) : l).trim();
+    if (!key) continue;
+    const desc = colon > 0 ? l.slice(colon + 1).trim() : undefined;
+    properties[key] = desc ? { type: 'string', description: desc } : { type: 'string' };
+    required.push(key);
+  }
+  return { type: 'object', properties, required };
+}
+
+const Row = ({ label, value, mono }: { label: string; value: string; mono?: boolean }) => (
+  <div className="flex justify-between gap-4 text-sm">
+    <span className="shrink-0 text-muted-foreground">{label}</span>
+    <span className={cn('break-all text-right', mono && 'font-mono text-xs')}>{value}</span>
+  </div>
+);
+
+type ListStep = 'start' | 'verify' | 'describe' | 'submit';
+
 export function MarketplaceSection(props: SectionProps) {
   const { session, client, busy, persist, run, toast } = props;
   const demoUrl = process.env.NEXT_PUBLIC_DEMO_PROVIDER_URL ?? 'http://localhost:4007';
@@ -621,16 +649,13 @@ export function MarketplaceSection(props: SectionProps) {
   const [category, setCategory] = useState('all');
   const [selectedToolId, setSelectedToolId] = useState('');
   const [toolInput, setToolInput] = useState(session.marketplaceInput ?? '{"asset":"USDC","chain":"ethereum"}');
+  const [tab, setTab] = useState('browse');
+  const [step, setStep] = useState<ListStep>('start');
+  const [startMode, setStartMode] = useState<'api' | 'x402'>('api');
+  const [endpoint, setEndpoint] = useState('');
+  const [verify, setVerify] = useState<{ status: 'idle' | 'checking' | 'verified' | 'error'; speaks402?: boolean; message?: string }>({ status: 'idle' });
+  const [describe, setDescribe] = useState({ providerName: 'My API', payout: '', name: '', category: 'general', newCategory: '', description: '', inputs: '', price: '0.10', contact: '' });
   const [providerToken, setProviderToken] = useState('');
-  const [listForm, setListForm] = useState({
-    providerName: 'My API',
-    payout: '',
-    name: '',
-    description: '',
-    category: 'general',
-    price: '0.10',
-    endpoint: '',
-  });
 
   const loadTools = async (msg?: string) => {
     const disc = await client.listTools({});
@@ -661,16 +686,49 @@ export function MarketplaceSection(props: SectionProps) {
       toast('ok', `Tool "${tool.name}" executed — paid ${res.price_paid} USDC`);
     });
 
-  const listTool = () =>
-    run('list tool', async () => {
-      if (!listForm.payout) throw new Error('payout wallet (0x…) is required');
-      if (!listForm.name) throw new Error('tool name is required');
-      if (!listForm.endpoint) throw new Error('endpoint URL is required');
-      const provider = await client.registerProvider({ name: listForm.providerName, payout_wallet_address: listForm.payout, payout_chain: 'sepolia' });
+  const checkEndpoint = () =>
+    run('verify endpoint', async () => {
+      if (!endpoint.trim()) throw new Error('endpoint URL is required');
+      setVerify({ status: 'checking' });
+      try {
+        const res = await fetch(endpoint, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ probe: true }) });
+        if (res.status === 402) {
+          const raw = (await res.json().catch(() => ({}))) as { challenge?: { amount?: string; token?: string; chain?: string; payTo?: string } };
+          const ch = raw.challenge ?? {};
+          if (ch.amount) setDescribe((d) => ({ ...d, price: ch.amount ?? d.price }));
+          if (ch.payTo) setDescribe((d) => ({ ...d, payout: ch.payTo ?? d.payout }));
+          setVerify({ status: 'verified', speaks402: true, message: `Price ${ch.amount ?? '?'} ${ch.token ?? 'USDC'} · payout ${(ch.payTo ?? '?').slice(0, 12)}…` });
+        } else {
+          setVerify({ status: 'verified', speaks402: false, message: `Reachable (HTTP ${res.status}) — will be wrapped with pay-per-call` });
+        }
+      } catch {
+        setVerify({ status: 'error', message: 'Could not reach the endpoint. Is it live, POST-friendly, and CORS-open?' });
+      }
+    });
+
+  const submitForReview = () =>
+    run('submit for review', async () => {
+      if (!endpoint.trim()) throw new Error('endpoint URL is required');
+      if (!describe.name.trim()) throw new Error('tool name is required');
+      if (!describe.payout.trim()) throw new Error('payout wallet (0x…) is required');
+      const category = describe.category === '__new' ? describe.newCategory.trim() : describe.category;
+      const provider = await client.registerProvider({ name: describe.providerName, payout_wallet_address: describe.payout, payout_chain: 'sepolia' });
       await client.approveProvider(provider.provider_id);
-      await client.createTool(provider.provider_token, { provider_id: provider.provider_id, name: listForm.name, description: listForm.description, category: listForm.category, price: listForm.price, price_token: 'USDC', endpoint_url: listForm.endpoint });
+      const desc = describe.description.trim();
+      const contact = describe.contact.trim();
+      await client.createTool(provider.provider_token, {
+        provider_id: provider.provider_id,
+        name: describe.name,
+        description: desc ? (contact ? `${desc} · contact: ${contact}` : desc) : undefined,
+        category,
+        price: describe.price,
+        price_token: 'USDC',
+        endpoint_url: endpoint,
+        input_schema: buildSchema(describe.inputs),
+      });
       setProviderToken(provider.provider_token);
-      await loadTools('Your tool is live and discoverable');
+      toast('ok', 'Submitted — your tool is live');
+      await loadTools();
     });
 
   const copy = (text: string) => { navigator.clipboard?.writeText(text); toast('ok', 'Copied'); };
@@ -682,10 +740,8 @@ export function MarketplaceSection(props: SectionProps) {
     return (!q || hay.includes(q)) && (category === 'all' || t.category === category);
   });
   const selected = tools.find((t) => t.id === selectedToolId) ?? null;
-  const field = (k: keyof typeof listForm) => ({
-    value: listForm[k],
-    onChange: (e: React.ChangeEvent<HTMLInputElement>) => setListForm({ ...listForm, [k]: e.target.value }),
-  });
+  const categoryLabel = describe.category === '__new' ? (describe.newCategory.trim() || 'new category') : describe.category;
+  const inputCount = describe.inputs.split('\n').map((l) => l.trim()).filter(Boolean).length;
 
   return (
     <div className="space-y-6">
@@ -700,7 +756,7 @@ export function MarketplaceSection(props: SectionProps) {
         </div>
       </div>
 
-      <Tabs defaultValue="browse" className="gap-4">
+      <Tabs value={tab} onValueChange={setTab} className="gap-4">
         <TabsList className="h-auto w-fit gap-1 p-1">
           <TabsTrigger value="browse">Browse tools</TabsTrigger>
           <TabsTrigger value="playground">Playground</TabsTrigger>
@@ -823,22 +879,131 @@ POST /v1/tools/:id/execute  call the tool       → paid via x402, settled on-ch
               <CardTitle className="flex items-center gap-2"><PackagePlus className="size-5 text-accent" /> List your tool</CardTitle>
               <CardDescription>Turn your API into an agent-ready, pay-per-call tool. Direct settlement to your payout wallet — 0% commission.</CardDescription>
             </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="grid gap-4 sm:grid-cols-2">
-                <div className="space-y-2"><Label>Provider name</Label><Input placeholder="My API" {...field('providerName')} /></div>
-                <div className="space-y-2"><Label>Payout wallet (0x…)</Label><Input placeholder="0x…" {...field('payout')} className="font-mono text-xs" /></div>
-                <div className="space-y-2"><Label>Tool name</Label><Input placeholder="e.g. lending-rates" {...field('name')} /></div>
-                <div className="space-y-2"><Label>Category</Label><Input placeholder="e.g. lending, governance" {...field('category')} /></div>
-                <div className="space-y-2"><Label>Price (USDC)</Label><Input placeholder="0.10" {...field('price')} className="font-mono text-xs" /></div>
-                <div className="space-y-2"><Label>Endpoint URL</Label><Input placeholder="https://api.example.com/v1/exec" {...field('endpoint')} className="font-mono text-xs" /></div>
+            <CardContent className="space-y-5">
+              <div className="flex flex-wrap items-center gap-1.5 text-xs font-medium">
+                {([
+                  ['start', '00 · How to start'],
+                  ['verify', '01 · Verify endpoint'],
+                  ['describe', '02 · Describe'],
+                  ['submit', '03 · Submit for review'],
+                ] as [ListStep, string][]).map(([s, label], i) => (
+                  <div key={s} className="flex items-center gap-1.5">
+                    {i > 0 && <ArrowRight className="size-3 text-muted-foreground/40" />}
+                    <button type="button" onClick={() => setStep(s)} disabled={busy !== null}
+                      className={cn('rounded-full px-3 py-1 transition-colors disabled:opacity-50', step === s ? 'bg-accent text-accent-foreground' : 'text-muted-foreground hover:text-foreground')}>
+                      {label}
+                    </button>
+                  </div>
+                ))}
               </div>
-              <div className="space-y-2"><Label>Description</Label><Input placeholder="What this tool answers, in one line" {...field('description')} /></div>
-              <Button variant="accent" onClick={listTool} disabled={busy !== null}><PackagePlus className="size-4" /> Submit for review</Button>
+
+              {step === 'start' && (
+                <div className="space-y-4">
+                  <p className="text-sm text-muted-foreground">How do you want to start?</p>
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <Card className={cn('cursor-pointer transition-colors hover:border-accent/60', startMode === 'api' && 'border-accent')} onClick={() => setStartMode('api')}>
+                      <CardHeader className="pb-2">
+                        <div className="flex items-center justify-between gap-2"><CardTitle className="text-base">I have an API</CardTitle><Badge variant="accent">Recommended</Badge></div>
+                        <CardDescription>Add pay-per-call payments in one function call.</CardDescription>
+                      </CardHeader>
+                    </Card>
+                    <Card className={cn('cursor-pointer transition-colors hover:border-accent/60', startMode === 'x402' && 'border-accent')} onClick={() => setStartMode('x402')}>
+                      <CardHeader className="pb-2"><CardTitle className="text-base">I already use x402</CardTitle><CardDescription>Bring your existing endpoint.</CardDescription></CardHeader>
+                      <CardContent className="pt-0 text-xs text-muted-foreground">Your endpoint answers 402 on Hedera or Arc. The router relays that 402 to callers and their signed payment back to you. Settlement happens at your endpoint; nothing changes on your side.</CardContent>
+                    </Card>
+                  </div>
+                  <Button variant="accent" onClick={() => setStep('verify')}><ArrowRight className="size-4" /> Continue</Button>
+                </div>
+              )}
+
+              {step === 'verify' && (
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <Label>Verify your endpoint</Label>
+                    <div className="flex items-center gap-2">
+                      <Input value={endpoint} onChange={(e) => setEndpoint(e.target.value)} placeholder="https://api.example.com/liquidation-risk" className="font-mono text-xs" />
+                      <Button variant="outline" onClick={checkEndpoint} disabled={busy !== null}><BadgeCheck className="size-4" /> Check</Button>
+                    </div>
+                    <p className="text-xs text-muted-foreground">We read the price, payment rails and payout address straight from your 402. POST, JSON body.</p>
+                  </div>
+                  {verify.status === 'checking' && <p className="text-sm text-muted-foreground">Checking {endpoint}…</p>}
+                  {verify.status === 'verified' && (
+                    <Alert variant="success"><BadgeCheck className="size-4" /><AlertTitle>{verify.speaks402 ? 'Speaks x402' : 'Endpoint reachable'}</AlertTitle><AlertDescription>{verify.message}</AlertDescription></Alert>
+                  )}
+                  {verify.status === 'error' && (
+                    <Alert variant="destructive"><XCircle className="size-4" /><AlertTitle>Verification failed</AlertTitle><AlertDescription>{verify.message}</AlertDescription></Alert>
+                  )}
+                  <div className="flex items-center gap-2">
+                    <Button variant="ghost" onClick={() => setStep('start')}><ArrowLeft className="size-4" /> Back</Button>
+                    <Button variant="accent" onClick={() => setStep('describe')} disabled={verify.status !== 'verified'}><ArrowRight className="size-4" /> Continue</Button>
+                  </div>
+                </div>
+              )}
+
+              {step === 'describe' && (
+                <div className="space-y-4">
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <div className="space-y-2"><Label>Tool name</Label><Input value={describe.name} onChange={(e) => setDescribe({ ...describe, name: e.target.value })} placeholder="Liquidation risk" /></div>
+                    <div className="space-y-2">
+                      <Label>Category</Label>
+                      <Select value={describe.category} onValueChange={(v) => setDescribe({ ...describe, category: v })}>
+                        <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          {categories.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                          <SelectItem value="__new">New category…</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      {describe.category === '__new' && <Input className="mt-1" value={describe.newCategory} onChange={(e) => setDescribe({ ...describe, newCategory: e.target.value })} placeholder="e.g. governance" />}
+                    </div>
+                  </div>
+                  <div className="space-y-2"><Label>What it answers</Label><Input value={describe.description} onChange={(e) => setDescribe({ ...describe, description: e.target.value })} placeholder="How close is this position to liquidation, and what price move gets it there?" /></div>
+                  <p className="-mt-2 text-xs text-muted-foreground">One sentence, shown on the catalogue card.</p>
+                  <div className="space-y-2">
+                    <Label>Inputs</Label>
+                    <textarea value={describe.inputs} onChange={(e) => setDescribe({ ...describe, inputs: e.target.value })} rows={3}
+                      placeholder={'address: the position owner\nchain: ethereum | base | arbitrum'}
+                      className="w-full rounded-md border border-input bg-transparent px-3 py-2 text-xs font-mono shadow-xs outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]" />
+                  </div>
+                  <p className="-mt-2 text-xs text-muted-foreground">One per line. Fixed choices as a | b | c.</p>
+                  <div className="grid gap-4 sm:grid-cols-3">
+                    <div className="space-y-2"><Label>Price (USDC)</Label><Input value={describe.price} onChange={(e) => setDescribe({ ...describe, price: e.target.value })} placeholder="0.10" className="font-mono text-xs" /></div>
+                    <div className="space-y-2"><Label>Payout wallet (0x…)</Label><Input value={describe.payout} onChange={(e) => setDescribe({ ...describe, payout: e.target.value })} placeholder="0x…" className="font-mono text-xs" /></div>
+                    <div className="space-y-2"><Label>Contact (GitHub or X)</Label><Input value={describe.contact} onChange={(e) => setDescribe({ ...describe, contact: e.target.value })} placeholder="you" /></div>
+                  </div>
+                  <div className="space-y-2"><Label>Provider name</Label><Input value={describe.providerName} onChange={(e) => setDescribe({ ...describe, providerName: e.target.value })} placeholder="My API" /></div>
+                  <div className="flex items-center gap-2">
+                    <Button variant="ghost" onClick={() => setStep('verify')}><ArrowLeft className="size-4" /> Back</Button>
+                    <Button variant="accent" onClick={() => setStep('submit')} disabled={!describe.name.trim()}><ArrowRight className="size-4" /> Continue</Button>
+                  </div>
+                </div>
+              )}
+
+              {step === 'submit' && !providerToken && (
+                <div className="space-y-4">
+                  <p className="text-sm font-medium">Review before submitting</p>
+                  <div className="space-y-2 rounded-lg border bg-muted/30 p-4">
+                    <Row label="Tool" value={`${describe.name} · ${categoryLabel}`} />
+                    <Row label="Endpoint" value={endpoint} mono />
+                    <Row label="Price" value={`${describe.price} USDC`} />
+                    <Row label="Payout" value={describe.payout} mono />
+                    <Row label="Answers" value={describe.description || '—'} />
+                    <Row label="Inputs" value={inputCount > 0 ? `${inputCount} field${inputCount === 1 ? '' : 's'}` : 'none'} />
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button variant="ghost" onClick={() => setStep('describe')}><ArrowLeft className="size-4" /> Back</Button>
+                    <Button variant="accent" onClick={submitForReview} disabled={busy !== null}><PackagePlus className="size-4" /> Submit for review</Button>
+                  </div>
+                </div>
+              )}
+
               {providerToken && (
-                <div className="space-y-2 text-sm">
-                  <Separator />
-                  <Label>Your provider token (manage this tool)</Label>
-                  <code className="block rounded-md bg-muted/40 px-3 py-2 text-xs font-mono break-all">{providerToken}</code>
+                <div className="space-y-4">
+                  <Alert variant="success"><CheckCircle2 className="size-4" /><AlertTitle>Submitted — your tool is live</AlertTitle><AlertDescription>Providers are approved instantly in this environment. Your tool now appears in Browse tools.</AlertDescription></Alert>
+                  <div className="space-y-2">
+                    <Label>Your provider token (manage this tool)</Label>
+                    <code className="block rounded-md bg-muted/40 px-3 py-2 text-xs font-mono break-all">{providerToken}</code>
+                  </div>
+                  <Button variant="accent" onClick={() => setTab('browse')}><ArrowRight className="size-4" /> Browse tools</Button>
                 </div>
               )}
             </CardContent>
