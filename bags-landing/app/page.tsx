@@ -12,8 +12,38 @@ import {
   ArrowRight,
   Sparkles,
   ChevronDown,
-  CircleDollarSign,
 } from 'lucide-react';
+
+function PaperBagIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      viewBox="16 14 66 74"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      stroke="currentColor"
+      strokeWidth="3.2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M 28 20 C 38 18 54 18 64 20" />
+      <path d="M 28 20 C 24 23 24 30 31 33" />
+      <path d="M 31 33 L 60 36.5" />
+      <path d="M 60 36.5 L 59 25" />
+      <path d="M 64 20 C 69 21 71.5 24 71.5 29 C 71.5 33 69 35 65 36" />
+      <path d="M 59 25 C 61 22.5 66 22 67.5 25.5 C 68.5 28.5 66.5 31.5 62 31.5" />
+      <path d="M 60 28.5 L 63.5 28.5 L 63.5 25" />
+      <path d="M 31 33 C 29.5 45 26.5 61 23.5 74.5" />
+      <path d="M 23.5 74.5 C 34 73 48 78 62.5 83" />
+      <path d="M 60 36.5 C 61 48 61.8 66 62.5 83" />
+      <path d="M 71 28.5 C 72.5 42 75 61 77 75" />
+      <path d="M 77 75 L 62.5 83" />
+      <path d="M 69.5 35 L 69 70.5" />
+      <path d="M 69 70.5 L 62.5 83" />
+      <path d="M 69 70.5 L 77 75" />
+    </svg>
+  );
+}
 
 const CONSOLE_URL = process.env.NEXT_PUBLIC_CONSOLE_URL ?? 'http://localhost:3000';
 
@@ -79,7 +109,7 @@ export default function Home() {
         <div className="max-w-7xl mx-auto flex justify-between items-center">
           <Link href="/" className="flex items-center gap-2">
             <div className="w-9 h-9 rounded-lg bg-white flex items-center justify-center shrink-0">
-              <CircleDollarSign className="w-5 h-5 text-black" />
+              <PaperBagIcon className="w-6 h-6 text-black" />
             </div>
             <span className="font-semibold text-lg tracking-tight">bagseven</span>
           </Link>
@@ -298,7 +328,7 @@ export default function Home() {
         <div className="max-w-7xl mx-auto flex flex-col sm:flex-row justify-between items-center gap-4">
           <div className="flex items-center gap-2">
             <div className="w-7 h-7 rounded-md bg-white flex items-center justify-center">
-              <CircleDollarSign className="w-4 h-4 text-black" />
+              <PaperBagIcon className="w-4 h-4 text-black" />
             </div>
             <span className="text-sm font-medium">bagseven</span>
           </div>

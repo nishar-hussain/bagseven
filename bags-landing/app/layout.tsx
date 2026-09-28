@@ -4,6 +4,9 @@ import './globals.css';
 export const metadata: Metadata = {
   title: 'bagseven',
   description: 'bagseven — the trust & settlement layer for autonomous AI agents: identity, policy, treasury, marketplaces, evolution',
+  icons: {
+    icon: '/icon.svg',
+  },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
