@@ -564,6 +564,9 @@ export function StepSettle(props: StepProps) {
       if ((err as { code?: string }).code === 'UNRESOLVABLE_PAYEE') {
         throw new Error('That spend has no real recipient — create a payee agent below, re-propose to it in Step 4, then settle again.', { cause: err });
       }
+      if ((err as { status?: number }).status === 404) {
+        throw new Error('This session references a wallet that no longer exists (data was reset). Click "Reset session" in the sidebar and start fresh.', { cause: err });
+      }
       throw err;
     }
     // Token is single-use: consume it immediately so the button can't reuse it.

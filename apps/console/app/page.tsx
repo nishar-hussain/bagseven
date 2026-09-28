@@ -62,17 +62,26 @@ export default function Page() {
           const saved = JSON.parse(raw) as { session?: Session; active?: StepKey; feed?: LogEntry[] };
           if (saved.session?.agentId && saved.session.signingKeyPem) {
             client.setAgent(saved.session.agentId, saved.session.signingKeyPem);
+            const reset = () => {
+              localStorage.removeItem(UI_KEY);
+              if (!cancelled) {
+                setSession(EMPTY_SESSION);
+                setActive('bootstrap');
+                setFeed([]);
+                setToasts((t) => [...t, { id: nextId(), kind: 'info', message: 'Previous session was wiped — starting fresh.' }]);
+              }
+            };
             try {
               await client.getAgent(saved.session.agentId);
+              // If the session remembers a wallet, make sure it still exists too.
+              if (saved.session.walletId) {
+                const w = await client.getWallet(saved.session.agentId);
+                const walletExists = w.wallets.some((x) => x.wallet.id === saved.session!.walletId);
+                if (!walletExists) throw { status: 404 };
+              }
             } catch (err) {
               if ((err as { status?: number }).status === 404) {
-                localStorage.removeItem(UI_KEY);
-                if (!cancelled) {
-                  setSession(EMPTY_SESSION);
-                  setActive('bootstrap');
-                  setFeed([]);
-                  setToasts((t) => [...t, { id: nextId(), kind: 'info', message: 'Previous session was wiped — starting fresh.' }]);
-                }
+                reset();
                 return;
               }
               // network/other error: keep the restored session; it's not stale.
@@ -80,7 +89,8 @@ export default function Page() {
           }
           if (saved.session) setSession(saved.session);
           if (saved.active) setActive(saved.active);
-          if (saved.feed) setFeed(saved.feed);
+          // Re-key restored feed entries so ids can never collide across refreshes.
+          if (saved.feed) setFeed(saved.feed.map((e) => ({ ...e, id: nextId() })));
         }
       } catch {
         /* ignore */
