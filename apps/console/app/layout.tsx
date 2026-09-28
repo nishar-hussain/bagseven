@@ -4,8 +4,8 @@ import { Toaster } from '../components/ui/sonner';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'AgentOS Console',
-  description: 'Infrastructure for autonomous AI agents — identity, treasury, policy, marketplaces',
+  title: 'bagseven',
+  description: 'bagseven — infrastructure for autonomous AI agents: identity, treasury, policy, marketplaces',
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

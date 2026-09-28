@@ -46,7 +46,7 @@ export function Header({ activeSection, gateway, agentStatus }: HeaderProps) {
         </button>
         <div className="w-9 h-9 rounded-lg overflow-hidden bg-secondary">
           <div className="w-full h-full bg-gradient-to-br from-accent/80 to-chart-1 flex items-center justify-center text-xs font-semibold text-accent-foreground">
-            AO
+            BS
           </div>
         </div>
       </div>

@@ -1,4 +1,4 @@
-# AgentOS
+# bagseven
 
 Infrastructure for autonomous AI agents: verifiable identity, policy-gated treasury, tool/data marketplaces, agent-to-agent economy, and a sandboxed evolution engine.
 

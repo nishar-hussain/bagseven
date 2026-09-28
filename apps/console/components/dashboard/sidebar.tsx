@@ -37,7 +37,7 @@ export function Sidebar({ activeSection, onSectionChange, collapsed, onCollapsed
             <CircleDollarSign className="w-5 h-5 text-accent-foreground" />
           </div>
           <span className={cn('font-semibold text-lg text-sidebar-foreground whitespace-nowrap transition-all duration-300', collapsed ? 'opacity-0 w-0' : 'opacity-100 w-auto')}>
-            AgentOS
+            bagseven
           </span>
         </div>
       </div>
