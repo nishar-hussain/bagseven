@@ -9,7 +9,7 @@ const sectionTitles: Record<Section, string> = {
   identity: 'Identity',
   treasury: 'Treasury',
   settle: 'Reserve & Settle',
-  marketplace: 'Marketplace',
+  marketplace: 'Tool Market',
   activity: 'Activity',
   settings: 'Settings',
 };

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { ConsoleClient } from '../../lib/client';
+import { cn } from '../../lib/utils';
 import { connectWallet, ensureSepolia, hasWallet, sendNative, sendUsdc, shortAddress } from '../../lib/wallet';
 import type { Session } from '../../lib/types';
 import { Button } from '../ui/button';
@@ -21,7 +22,6 @@ import {
   FileCheck2,
   Coins,
   Send,
-  Store,
   RefreshCw,
   Bot,
   UserPlus,
@@ -31,6 +31,12 @@ import {
   CheckCircle2,
   XCircle,
   Activity,
+  Search,
+  Copy,
+  Sparkles,
+  PackagePlus,
+  Terminal,
+  Wand2,
 } from 'lucide-react';
 
 export interface SectionProps {
@@ -596,83 +602,249 @@ export function SettleSection(props: SectionProps) {
 
 /* ─────────────────────────── MARKETPLACE ─────────────────────────── */
 
+interface MarketTool {
+  id: string;
+  name: string;
+  description: string | null;
+  category: string;
+  price: string;
+  provider: { id: string; name: string };
+}
+
 export function MarketplaceSection(props: SectionProps) {
   const { session, client, busy, persist, run, toast } = props;
   const demoUrl = process.env.NEXT_PUBLIC_DEMO_PROVIDER_URL ?? 'http://localhost:4007';
   const demoPayout = process.env.NEXT_PUBLIC_DEMO_PAYOUT ?? '0x9965507D1a55bcC2695C58ba16FB37d819B0A4dc';
-  const [tools, setTools] = useState<Array<{ id: string; name: string; category: string; price: string; provider: { name: string } }>>([]);
-  const [selectedTool, setSelectedTool] = useState('');
-  const [toolInput, setToolInput] = useState(session.marketplaceInput ?? '{"position":"aave-wbtc-2x"}');
+  const mcpEndpoint = process.env.NEXT_PUBLIC_MCP_URL ?? 'http://localhost:4008/mcp';
+  const [tools, setTools] = useState<MarketTool[]>([]);
+  const [query, setQuery] = useState('');
+  const [category, setCategory] = useState('all');
+  const [selectedToolId, setSelectedToolId] = useState('');
+  const [toolInput, setToolInput] = useState(session.marketplaceInput ?? '{"asset":"USDC","chain":"ethereum"}');
+  const [providerToken, setProviderToken] = useState('');
+  const [listForm, setListForm] = useState({
+    providerName: 'My API',
+    payout: '',
+    name: '',
+    description: '',
+    category: 'general',
+    price: '0.10',
+    endpoint: '',
+  });
+
+  const loadTools = async (msg?: string) => {
+    const disc = await client.listTools({});
+    setTools(disc.tools);
+    setSelectedToolId((cur) => (cur && disc.tools.some((t) => t.id === cur) ? cur : (disc.tools[0]?.id ?? '')));
+    if (msg) toast('info', msg);
+  };
+
+  useEffect(() => { loadTools().catch(() => undefined); }, []);
 
   const seed = () =>
     run('seed demo marketplace', async () => {
       const provider = await client.registerProvider({ name: 'Demo Data Provider', payout_wallet_address: demoPayout, payout_chain: 'sepolia' });
       await client.approveProvider(provider.provider_id);
       await client.createTool(provider.provider_token, { provider_id: provider.provider_id, name: 'liquidation-risk', description: 'Returns liquidation risk score for a position', category: 'trading', price: '0.10', price_token: 'USDC', endpoint_url: `${demoUrl}/v1/exec` });
-      const disc = await client.listTools({});
-      setTools(disc.tools);
-      setSelectedTool(disc.tools[0]?.id ?? '');
-      toast('ok', 'Demo provider + tool seeded');
-    });
-
-  const refreshTools = () =>
-    run('refresh tool list', async () => {
-      const disc = await client.listTools({});
-      setTools(disc.tools);
-      toast('info', `${disc.tools.length} tools available`);
+      await loadTools('Demo provider + tool seeded');
     });
 
   const execute = () =>
     run('execute paid tool', async () => {
       if (!session.agentId) throw new Error('create an agent first');
-      if (!selectedTool) throw new Error('seed or refresh the marketplace first');
+      if (!selectedToolId) throw new Error('pick a tool first');
       let input: Record<string, unknown>;
       try { input = JSON.parse(toolInput); } catch { throw new Error('tool input must be valid JSON'); }
-      const tool = tools.find((t) => t.id === selectedTool)!;
-      const res = await client.executeTool(selectedTool, session.agentId, input, `tool-${Date.now()}`);
+      const tool = tools.find((t) => t.id === selectedToolId)!;
+      const res = await client.executeTool(selectedToolId, session.agentId, input, `tool-${Date.now()}`);
       persist({ ...session, toolExecutions: (session.toolExecutions ?? 0) + 1, lastToolExecution: { id: res.execution_id, name: tool.name, price: res.price_paid, txHash: res.tx_hash, output: JSON.stringify(res.output) }, marketplaceInput: toolInput });
       toast('ok', `Tool "${tool.name}" executed — paid ${res.price_paid} USDC`);
     });
 
+  const listTool = () =>
+    run('list tool', async () => {
+      if (!listForm.payout) throw new Error('payout wallet (0x…) is required');
+      if (!listForm.name) throw new Error('tool name is required');
+      if (!listForm.endpoint) throw new Error('endpoint URL is required');
+      const provider = await client.registerProvider({ name: listForm.providerName, payout_wallet_address: listForm.payout, payout_chain: 'sepolia' });
+      await client.approveProvider(provider.provider_id);
+      await client.createTool(provider.provider_token, { provider_id: provider.provider_id, name: listForm.name, description: listForm.description, category: listForm.category, price: listForm.price, price_token: 'USDC', endpoint_url: listForm.endpoint });
+      setProviderToken(provider.provider_token);
+      await loadTools('Your tool is live and discoverable');
+    });
+
+  const copy = (text: string) => { navigator.clipboard?.writeText(text); toast('ok', 'Copied'); };
+
+  const categories = Array.from(new Set(tools.map((t) => t.category)));
+  const filtered = tools.filter((t) => {
+    const q = query.trim().toLowerCase();
+    const hay = `${t.name} ${t.description ?? ''} ${t.category} ${t.provider.name}`.toLowerCase();
+    return (!q || hay.includes(q)) && (category === 'all' || t.category === category);
+  });
+  const selected = tools.find((t) => t.id === selectedToolId) ?? null;
+  const field = (k: keyof typeof listForm) => ({
+    value: listForm[k],
+    onChange: (e: React.ChangeEvent<HTMLInputElement>) => setListForm({ ...listForm, [k]: e.target.value }),
+  });
+
   return (
     <div className="space-y-6">
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2"><Store className="size-5 text-accent" /> Tool marketplace</CardTitle>
-          <CardDescription>Browse paid tools and execute one — policy-checked, paid via x402, settled on-chain to the provider's registered payout.</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="flex flex-wrap gap-2">
-            <Button onClick={seed} disabled={busy !== null}><Plus className="size-4" /> Seed demo provider + tool ($0.10)</Button>
-            <Button variant="outline" onClick={refreshTools} disabled={busy !== null}><RefreshCw className="size-4" /> Refresh tools</Button>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <Badge variant="outline" className="gap-1.5 py-1"><Wand2 className="size-3 text-accent" /> Agent-ready · pay-per-call · x402</Badge>
+          <Badge variant="outline" className="gap-1.5 py-1"><CircleDollarSign className="size-3 text-accent" /> 0% commission</Badge>
+        </div>
+        <div className="flex gap-2">
+          <Button variant="outline" size="sm" onClick={seed} disabled={busy !== null}><Plus className="size-4" /> Seed demo ($0.10)</Button>
+          <Button variant="outline" size="sm" onClick={() => loadTools('tools refreshed')} disabled={busy !== null}><RefreshCw className="size-4" /> Refresh</Button>
+        </div>
+      </div>
+
+      <Tabs defaultValue="browse" className="gap-4">
+        <TabsList className="h-auto w-fit gap-1 p-1">
+          <TabsTrigger value="browse">Browse tools</TabsTrigger>
+          <TabsTrigger value="playground">Playground</TabsTrigger>
+          <TabsTrigger value="connect">Connect</TabsTrigger>
+          <TabsTrigger value="list">List a tool</TabsTrigger>
+        </TabsList>
+
+        {/* Browse */}
+        <TabsContent value="browse" className="mt-4 space-y-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+              <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search tools: lending rates, quorum, delegates…" className="pl-9" />
+            </div>
+            <Select value={category} onValueChange={setCategory}>
+              <SelectTrigger className="w-full sm:w-40"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All</SelectItem>
+                {categories.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+              </SelectContent>
+            </Select>
           </div>
-          {tools.length > 0 && (
-            <>
-              <div className="space-y-2"><Label>Tool</Label>
-                <Select value={selectedTool} onValueChange={setSelectedTool}>
-                  <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    {tools.map((t) => <SelectItem key={t.id} value={t.id}>{t.name} · {t.category} · ${t.price} · {t.provider.name}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2"><Label>Input (JSON)</Label><Input value={toolInput} onChange={(e) => { setToolInput(e.target.value); persist({ ...session, marketplaceInput: e.target.value }); }} /></div>
-              <Button variant="accent" onClick={execute} disabled={busy !== null || !session.agentId}><Zap className="size-4" /> Execute &amp; pay</Button>
-            </>
-          )}
-          {session.lastToolExecution && (
-            <div className="space-y-2 text-sm">
-              <Separator />
-              <div className="flex flex-wrap gap-2">
-                <Badge variant="success">{session.lastToolExecution.name}</Badge>
-                <Badge variant="secondary">paid {session.lastToolExecution.price} USDC</Badge>
-                {session.lastToolExecution.txHash && <Badge variant="muted"><Mono>{session.lastToolExecution.txHash.slice(0, 16)}…</Mono></Badge>}
-              </div>
-              <pre className="rounded-lg bg-muted/40 p-3 text-xs overflow-auto">{session.lastToolExecution.output}</pre>
+          {filtered.length > 0 ? (
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+              {filtered.map((t) => (
+                <Card key={t.id} className={cn('cursor-pointer transition-colors hover:border-accent/60', selectedToolId === t.id && 'border-accent')} onClick={() => setSelectedToolId(t.id)}>
+                  <CardHeader className="pb-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <Badge variant="outline" className="uppercase text-[10px] tracking-wider">{t.category}</Badge>
+                      <Badge variant="success" className="font-mono">${Number(t.price).toFixed(2)}</Badge>
+                    </div>
+                    <CardTitle className="text-base">{t.name}</CardTitle>
+                    <CardDescription>{t.description || 'No description.'}</CardDescription>
+                  </CardHeader>
+                  <CardContent className="pt-0 space-y-1.5 text-xs text-muted-foreground">
+                    <div className="flex items-center gap-1.5"><Sparkles className="size-3" /> Powered by {t.provider.name}</div>
+                    <div className="flex items-center gap-1.5"><Zap className="size-3 text-accent" /> no answer, no charge</div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          ) : (
+            <div className="rounded-lg border border-dashed p-10 text-center text-sm text-muted-foreground">
+              No tools yet — <button className="text-accent underline underline-offset-4" onClick={seed} disabled={busy !== null}>seed the demo provider</button> or list your own.
             </div>
           )}
-        </CardContent>
-      </Card>
+        </TabsContent>
+
+        {/* Playground */}
+        <TabsContent value="playground" className="mt-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2"><Zap className="size-5 text-accent" /> Playground</CardTitle>
+              <CardDescription>Pick a tool, set the arguments, run it — paid from your agent's wallet. Watch the 402 turn into an answer.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {selected ? (
+                <>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge variant="outline">{selected.category}</Badge>
+                    <span className="text-sm font-medium">{selected.name}</span>
+                    <Badge variant="success" className="font-mono">${Number(selected.price).toFixed(2)}</Badge>
+                    <span className="text-xs text-muted-foreground">powered by {selected.provider.name}</span>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Arguments (JSON)</Label>
+                    <Input value={toolInput} onChange={(e) => { setToolInput(e.target.value); persist({ ...session, marketplaceInput: e.target.value }); }} className="font-mono text-xs" />
+                  </div>
+                  <Button variant="accent" onClick={execute} disabled={busy !== null || !session.agentId}><Zap className="size-4" /> Run and pay ${Number(selected.price).toFixed(2)}</Button>
+                  {!session.agentId && <p className="text-xs text-muted-foreground">Create an agent to pay from its wallet.</p>}
+                </>
+              ) : (
+                <p className="text-sm text-muted-foreground">Pick a tool in <b>Browse tools</b> first.</p>
+              )}
+              {session.lastToolExecution && (
+                <div className="space-y-2 text-sm">
+                  <Separator />
+                  <div className="flex flex-wrap gap-2">
+                    <Badge variant="success">{session.lastToolExecution.name}</Badge>
+                    <Badge variant="secondary">paid {session.lastToolExecution.price} USDC</Badge>
+                    {session.lastToolExecution.txHash && <Badge variant="muted"><Mono>{session.lastToolExecution.txHash.slice(0, 16)}…</Mono></Badge>}
+                  </div>
+                  <pre className="rounded-lg bg-muted/40 p-3 text-xs overflow-auto">{session.lastToolExecution.output}</pre>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* Connect */}
+        <TabsContent value="connect" className="mt-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2"><Terminal className="size-5 text-accent" /> Give your agent onchain tools</CardTitle>
+              <CardDescription>Add the endpoint. Your agent sees every tool, calls one, pays for it, gets the answer.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div>
+                <Label>The endpoint</Label>
+                <div className="mt-1 flex items-center gap-2">
+                  <code className="flex-1 rounded-md bg-muted/40 px-3 py-2 text-sm font-mono">{mcpEndpoint}</code>
+                  <Button variant="outline" size="sm" onClick={() => copy(mcpEndpoint)}><Copy className="size-4" /> Copy</Button>
+                </div>
+              </div>
+              <div>
+                <Label>How a call works</Label>
+                <pre className="mt-1 rounded-lg bg-muted/40 p-3 text-xs overflow-auto">{`POST /v1/spend-intents      propose the spend   → policy checks it
+POST /v1/reservations       reserve the funds   → treasury locks USDC
+POST /v1/tools/:id/execute  call the tool       → paid via x402, settled on-chain`}</pre>
+              </div>
+              <p className="text-xs text-muted-foreground">Your agent's wallet signs every payment; the platform never holds a key. Any wallet that signs x402 requests works.</p>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* List a tool */}
+        <TabsContent value="list" className="mt-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2"><PackagePlus className="size-5 text-accent" /> List your tool</CardTitle>
+              <CardDescription>Turn your API into an agent-ready, pay-per-call tool. Direct settlement to your payout wallet — 0% commission.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="space-y-2"><Label>Provider name</Label><Input placeholder="My API" {...field('providerName')} /></div>
+                <div className="space-y-2"><Label>Payout wallet (0x…)</Label><Input placeholder="0x…" {...field('payout')} className="font-mono text-xs" /></div>
+                <div className="space-y-2"><Label>Tool name</Label><Input placeholder="e.g. lending-rates" {...field('name')} /></div>
+                <div className="space-y-2"><Label>Category</Label><Input placeholder="e.g. lending, governance" {...field('category')} /></div>
+                <div className="space-y-2"><Label>Price (USDC)</Label><Input placeholder="0.10" {...field('price')} className="font-mono text-xs" /></div>
+                <div className="space-y-2"><Label>Endpoint URL</Label><Input placeholder="https://api.example.com/v1/exec" {...field('endpoint')} className="font-mono text-xs" /></div>
+              </div>
+              <div className="space-y-2"><Label>Description</Label><Input placeholder="What this tool answers, in one line" {...field('description')} /></div>
+              <Button variant="accent" onClick={listTool} disabled={busy !== null}><PackagePlus className="size-4" /> Submit for review</Button>
+              {providerToken && (
+                <div className="space-y-2 text-sm">
+                  <Separator />
+                  <Label>Your provider token (manage this tool)</Label>
+                  <code className="block rounded-md bg-muted/40 px-3 py-2 text-xs font-mono break-all">{providerToken}</code>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }

@@ -65,7 +65,7 @@ const navItems: { id: Section; label: string; icon: React.ElementType; group?: s
   { id: 'identity', label: 'Identity', icon: ShieldCheck },
   { id: 'treasury', label: 'Treasury', icon: Wallet },
   { id: 'settle', label: 'Reserve & Settle', icon: Send },
-  { id: 'marketplace', label: 'Marketplace', icon: Store },
+  { id: 'marketplace', label: 'Tool Market', icon: Store },
   { id: 'activity', label: 'Activity', icon: Activity },
   { id: 'settings', label: 'Settings', icon: Settings },
 ];
