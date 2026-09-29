@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { ConsoleClient } from '../../lib/client';
 import { cn } from '../../lib/utils';
-import { shortAddress } from '../../lib/wallet';
+import { connectWallet, ensureSepolia, hasWallet, sendNative, sendUsdc, shortAddress } from '../../lib/wallet';
 import type { Session, SpendDecision } from '../../lib/types';
 import { Button } from '../ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/card';
@@ -15,11 +15,9 @@ import { Separator } from '../ui/separator';
 import { Alert, AlertDescription, AlertTitle } from '../ui/alert';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
-import { MetricCard } from './metric-card';
 import {
   ShieldCheck,
   Wallet as WalletIcon,
-  FileCheck2,
   Send,
   RefreshCw,
   Bot,
@@ -41,7 +39,6 @@ import {
   BadgeCheck,
   List,
   GitBranch,
-  Info,
   X,
 } from 'lucide-react';
 
@@ -52,7 +49,7 @@ export interface SectionProps {
   persist: (s: Session) => void;
   run: (name: string, fn: () => Promise<void>) => Promise<void>;
   toast: (kind: 'ok' | 'error' | 'info', message: string) => void;
-  onNavigate?: (section: any) => void;
+  onNavigate?: (section: string) => void;
 }
 
 const Mono = ({ children }: { children: React.ReactNode }) => <span className="font-mono text-xs">{children}</span>;
@@ -60,7 +57,7 @@ const Mono = ({ children }: { children: React.ReactNode }) => <span className="f
 /* ─────────────────────────── OVERVIEW ─────────────────────────── */
 
 export function OverviewSection(props: SectionProps) {
-  const { session, client, busy, persist, run, toast, onNavigate } = props;
+  const { session, client, persist, run, toast, onNavigate } = props;
   const [overview, setOverview] = useState<Record<string, unknown> | null>(null);
 
   const loadOverview = () =>
@@ -76,6 +73,10 @@ export function OverviewSection(props: SectionProps) {
       persist({ ...session, tree: session.tree, balances: w.wallets[0]?.balances ?? session.balances });
       toast('ok', 'Refreshed');
     });
+
+  useEffect(() => {
+    if (session.agentId) loadOverview();
+  }, [session.agentId, session.mandate?.mandate_id]);
 
   const o = overview as {
     mandate_id?: string;
@@ -99,27 +100,6 @@ export function OverviewSection(props: SectionProps) {
   const liveCount = o?.agents ? o.agents.filter(a => a.status !== 'revoked').length : 5;
   const revokedCount = o?.agents ? o.agents.filter(a => a.status === 'revoked').length : 1;
   const levelsCount = o?.agents ? Math.max(...o.agents.map(a => a.depth), 0) + 1 : 3;
-
-  // Default agents matching screenshot
-  const defaultAgents = [
-    { name: 'olivia.eth', address: '0x1f51de...981e', depthLabel: 'Root', pct: '0%', cap: '$20.00', revoked: false },
-    { name: 'trade.olivia.eth', address: '0xb9bf43...8189', depthLabel: 'Depth 1', pct: '0%', cap: '$10.00', revoked: false },
-    { name: 'research.olivia.eth', address: '0x11d30c...929f Depth 1', depthLabel: 'Depth 1', pct: '0%', cap: '$10.00', revoked: false },
-    { name: 'data.olivia.eth', address: '0xd13933...bbf7 Depth 1', depthLabel: 'Depth 1', pct: '0%', cap: '$10.00', revoked: false },
-    { name: 'btc.trade.olivia.eth', address: '0x24fe50...f6da Depth 2', depthLabel: 'Depth 2', pct: '0%', cap: '$5.00', revoked: false },
-    { name: 'btc.trade.olivia.eth', address: '0x01f329...0b3a Depth 2', depthLabel: 'Depth 2', pct: '0%', cap: '$0.00', revoked: true },
-  ];
-
-  // Default refusals matching screenshot
-  const defaultRefusals = [
-    { amount: '$2.50', bound: 'tranche-cap', agent: 'olivia.eth', status: 'Standing' },
-    { amount: '$2.50', bound: 'tranche-cap', agent: 'research.olivia.eth', status: 'Standing' },
-    { amount: '$2.50', bound: 'tranche-cap', agent: 'btc.trade.olivia.eth', status: 'Standing' },
-  ];
-
-  const operatorAddress = o?.terms?.operator_address
-    ? `${o.terms.operator_address.slice(0, 10)}...${o.terms.operator_address.slice(-6)}`
-    : '0xa78B4a56...152B70';
 
   // No mandate yet → show empty state
   if (!session.mandate) {
@@ -455,6 +435,36 @@ export function VaultSection(props: SectionProps) {
       toast('ok', `Credited ${fundAmount} USDC (dev faucet)`);
     });
 
+  const connect = () =>
+    run('connect my wallet', async () => {
+      if (!hasWallet()) throw new Error('No browser wallet (MetaMask) detected — use the Dev faucet instead.');
+      const address = await connectWallet();
+      await ensureSepolia();
+      persist({ ...session, userWallet: address });
+      toast('ok', `Connected ${shortAddress(address)}`);
+    });
+
+  const fundFromWallet = () =>
+    run(`fund ${fundAmount} USDC from my wallet`, async () => {
+      if (!session.walletId) throw new Error('provision a vault wallet first');
+      if (!session.userWallet) throw new Error('connect your wallet first');
+      const gasEth = process.env.NEXT_PUBLIC_GAS_GRANT_ETH ?? '0.01';
+      const txHash = await sendUsdc(session.userWallet, session.walletAddress!, fundAmount);
+      try { await sendNative(session.userWallet, session.walletAddress!, gasEth); } catch { /* declined gas grant */ }
+      toast('info', 'Transactions sent — waiting for confirmation…');
+      let rec: { balances: Array<{ token: string; amount: string; reservedAmount: string }> } | null = null;
+      for (let i = 0; i < 30; i++) {
+        await new Promise((r) => setTimeout(r, 4000));
+        rec = await client.reconcileWallet(session.walletId);
+        const u = rec.balances.find((b) => b.token === 'USDC');
+        if (u && Number(u.amount) >= Number(fundAmount)) break;
+      }
+      persist(await refresh({ ...session, balances: rec?.balances ?? session.balances }));
+      const u = (rec?.balances ?? session.balances).find((b) => b.token === 'USDC');
+      if (u && Number(u.amount) >= Number(fundAmount)) toast('ok', `Sent ${fundAmount} USDC (+ ${gasEth} ETH gas) — tx ${txHash.slice(0, 12)}…`);
+      else toast('info', `Tx ${txHash.slice(0, 12)}… sent but not confirmed yet — reconcile again.`);
+    });
+
   const withdraw = () =>
     run('withdraw from vault', async () => {
       if (!session.agentId) throw new Error('create an agent first');
@@ -507,11 +517,23 @@ export function VaultSection(props: SectionProps) {
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="space-y-2"><Label>Fund amount (USDC)</Label><Input value={fundAmount} onChange={(e) => setFundPersist(e.target.value)} /></div>
-              <Button onClick={devFaucet} disabled={busy !== null}><Zap className="size-4" /> {busy ? 'Working…' : 'Dev faucet'}</Button>
+              <div className="flex flex-wrap gap-2">
+                <Button onClick={devFaucet} disabled={busy !== null}><Zap className="size-4" /> {busy ? 'Working…' : 'Dev faucet'}</Button>
+                {session.userWallet ? (
+                  <Button variant="accent" onClick={fundFromWallet} disabled={busy !== null}><Send className="size-4" /> Send {fundAmount} USDC from my wallet</Button>
+                ) : (
+                  <Button variant="outline" onClick={connect} disabled={busy !== null}><WalletIcon className="size-4" /> Connect my wallet</Button>
+                )}
+              </div>
+              {session.userWallet && (
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <Badge variant="accent">connected</Badge><Mono>{shortAddress(session.userWallet)}</Mono>
+                </div>
+              )}
               <Separator />
               <div className="space-y-2"><Label>Withdraw amount (USDC)</Label><Input value={withdrawAmount} onChange={(e) => setWithdrawAmount(e.target.value)} /></div>
               <Button variant="accent" onClick={withdraw} disabled={busy !== null}><Send className="size-4" /> Withdraw</Button>
-              <Alert variant="warning"><AlertTitle>Available ≠ reserved</AlertTitle><AlertDescription>Withdrawals only reduce the available balance — reserved funds stay locked for pending purchases.</AlertDescription></Alert>
+              <Alert variant="warning"><AlertTitle>Available ≠ reserved</AlertTitle><AlertDescription>Withdrawals only reduce the available balance — reserved funds stay locked for pending purchases. Wallet funding sends USDC + a small ETH gas grant.</AlertDescription></Alert>
             </CardContent>
           </Card>
         </div>
@@ -966,7 +988,7 @@ export function AgentsSection(props: SectionProps) {
 
     await run('spawn child agent', async () => {
       try {
-        const child = await client.spawnAgent(session.mandate!.mandate_id, {
+        await client.spawnAgent(session.mandate!.mandate_id, {
           parent_agent_id: session.agentId || '00000000-0000-0000-0000-000000000000',
           display_name: opAddr,
           share_bps: shareBps,
@@ -976,7 +998,7 @@ export function AgentsSection(props: SectionProps) {
         setOperatorInput('');
         setSharePercent('50');
         await loadTree();
-      } catch (err: any) {
+      } catch {
         // Fallback for demonstration/client if server requires exact root UUID
         const fallbackChild = {
           id: `child-${Date.now()}`,
