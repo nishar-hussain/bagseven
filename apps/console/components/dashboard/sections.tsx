@@ -656,7 +656,7 @@ export function MarketplaceSection(props: SectionProps) {
   const { session, client, busy, persist, run, toast } = props;
   const demoUrl = process.env.NEXT_PUBLIC_DEMO_PROVIDER_URL ?? 'http://localhost:4007';
   const demoPayout = process.env.NEXT_PUBLIC_DEMO_PAYOUT ?? '0x9965507D1a55bcC2695C58ba16FB37d819B0A4dc';
-  const mcpEndpoint = process.env.NEXT_PUBLIC_MCP_URL ?? 'http://localhost:4008/mcp';
+  const mcpEndpoint = process.env.NEXT_PUBLIC_MCP_URL ?? 'http://localhost:4008/v1/mcp';
   const [tools, setTools] = useState<MarketTool[]>([]);
   const [query, setQuery] = useState('');
   const [category, setCategory] = useState('all');
