@@ -25,6 +25,10 @@
     "pm2:restart": "pnpm exec pm2 restart deploy/ecosystem.config.cjs"
   },
   "devDependencies": {
+    "@agentos/db": "workspace:*",
+    "@agentos/money": "workspace:*",
+    "@agentos/onchain": "workspace:*",
+    "@agentos/server": "workspace:*",
     "@eslint/js": "^10.0.1",
     "@types/node": "^26.6.1",
     "eslint": "^10.10.0",

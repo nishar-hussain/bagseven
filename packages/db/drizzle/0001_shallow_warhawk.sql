@@ -1,1 +1,0 @@
-ALTER TYPE "public"."custody_type" ADD VALUE 'eoa';

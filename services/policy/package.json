@@ -20,13 +20,10 @@
     "start": "node --env-file-if-exists=../../.env dist/index.js"
   },
   "dependencies": {
-    "@agentos/auth": "workspace:*",
     "@agentos/db": "workspace:*",
-    "@agentos/events": "workspace:*",
-    "@agentos/mandate": "workspace:*",
+    "@agentos/onchain": "workspace:*",
     "@agentos/money": "workspace:*",
     "@agentos/server": "workspace:*",
-    "@agentos/testing": "workspace:*",
     "drizzle-orm": "^0.45.2",
     "fastify": "^5.12.5",
     "ioredis": "^6.0.0",

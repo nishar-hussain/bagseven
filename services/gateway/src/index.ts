@@ -1,85 +1,34 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { randomUUID } from 'node:crypto';
-import { createDb, agents } from '@agentos/db';
-import { eq } from 'drizzle-orm';
+import { createDb } from '@agentos/db';
 import { Redis } from 'ioredis';
-import { ApiError, envelopeAuth, rateLimit, createService } from '@agentos/server';
+import { rateLimit, createService } from '@agentos/server';
 import cors from '@fastify/cors';
 
-interface Upstream {
-  baseUrl: string;
-}
-
-function upstreamFor(path: string, cfg: NodeJS.ProcessEnv): Upstream {
-  const u = (env: string) => ({ baseUrl: cfg[env] ?? '' });
-  if (path.includes('/spend-summary')) return u('POLICY_URL');
-  if (path.startsWith('/v1/guardian-approvals') || path.startsWith('/v1/compensations')) return u('POLICY_URL');
-  if (path.startsWith('/v1/mandates') || path.startsWith('/v1/refusals') || path.startsWith('/v1/resolve') || path.startsWith('/v1/spend-commits') || path.startsWith('/v1/spend-reversals')) return u('POLICY_URL');
-  if (path.startsWith('/v1/agents') && path.includes('/receipts')) return u('VERIFICATION_URL');
-  if (path.startsWith('/v1/agents') || path.startsWith('/v1/organizations') || path.startsWith('/v1/guardians')) return u('IDENTITY_URL');
-  if (path.startsWith('/v1/policies') || path.startsWith('/v1/spend-intents') || path.startsWith('/v1/policy-checks')) return u('POLICY_URL');
-  if (path.startsWith('/v1/wallets') || path.startsWith('/v1/reservations') || path.startsWith('/v1/vaults')) return u('TREASURY_URL');
-  if (path.startsWith('/v1/receipts')) return u('VERIFICATION_URL');
-  if (path.startsWith('/v1/tool-providers') || path.startsWith('/v1/tools') || path.startsWith('/v1/tool-executions') || path.startsWith('/v1/mcp')) return u('MARKETPLACE_URL');
-  throw new ApiError(404, 'NOT_FOUND', `no upstream for ${path}`);
-}
-
 async function proxy(req: FastifyRequest, reply: FastifyReply, cfg: NodeJS.ProcessEnv): Promise<unknown> {
-  const upstream = upstreamFor(req.url.split('?')[0]!, cfg);
-  if (!upstream.baseUrl) throw new ApiError(503, 'UPSTREAM_UNCONFIGURED', `no upstream configured for ${req.url}`);
-
+  const baseUrl = cfg.MANDATE_URL ?? cfg.POLICY_URL;
+  if (!baseUrl) throw new Error('MANDATE_URL not configured');
   const body = req.body === undefined ? undefined : JSON.stringify(req.body);
   const headers: Record<string, string> = {
     'x-trace-id': (req.headers['x-trace-id'] as string) ?? randomUUID(),
   };
   if (typeof req.headers['content-type'] === 'string') headers['content-type'] = req.headers['content-type'];
-  if (typeof req.headers['idempotency-key'] === 'string') {
-    // Scope idempotency keys per agent so two agents never collide on the same key.
-    const agentId = (req as FastifyRequest & { agent?: { id: string } }).agent?.id;
-    headers['idempotency-key'] = agentId ? `${agentId}:${req.headers['idempotency-key']}` : req.headers['idempotency-key'];
-  }
-  if (typeof req.headers['x-guardian-token'] === 'string') headers['x-guardian-token'] = req.headers['x-guardian-token'];
-  if (typeof req.headers['x-provider-token'] === 'string') headers['x-provider-token'] = req.headers['x-provider-token'];
+  if (typeof req.headers['idempotency-key'] === 'string') headers['idempotency-key'] = req.headers['idempotency-key'];
 
-  const res = await fetch(`${upstream.baseUrl}${req.url}`, {
-    method: req.method,
-    headers,
-    body,
-  });
+  const res = await fetch(`${baseUrl}${req.url}`, { method: req.method, headers, body });
   const text = await res.text();
   const payload = text ? JSON.parse(text) : undefined;
   reply.code(res.status);
   return payload;
 }
 
-const BOOTSTRAP_PREFIXES = ['/healthz', '/v1/organizations', '/v1/guardians', '/v1/agents', '/v1/guardian-approvals', '/v1/tool-providers', '/v1/mcp'];
-
-export function buildGatewayRoutes(app: FastifyInstance, { db, redis, config }: { db: ReturnType<typeof createDb>; redis: Redis; config: NodeJS.ProcessEnv }): void {
+export function buildGatewayRoutes(app: FastifyInstance, { redis, config }: { db: ReturnType<typeof createDb>; redis: Redis; config: NodeJS.ProcessEnv }): void {
   void app.register(cors, {
     origin: config.CORS_ORIGIN === '*' ? true : (config.CORS_ORIGIN ?? 'http://localhost:3000').split(','),
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   });
 
   app.addHook('preHandler', rateLimit(redis, { limit: Number(config.RATE_LIMIT_PER_AGENT ?? 50), windowSeconds: 1 }));
-
-  app.addHook('preHandler', async (req, reply) => {
-    const path = req.url.split('?')[0]!;
-    // Marketplace public paths: discovery (GET /v1/tools), tool registration +
-    // provider management (provider-token / platform auth at the service). Tool
-    // EXECUTION (POST /v1/tools/:id/execute) still requires an agent envelope.
-    const isToolExecution = req.method === 'POST' && /^\/v1\/tools\/[^/]+\/execute$/.test(path);
-    const isMarketplacePublic = path.startsWith('/v1/tool-providers') || path.startsWith('/v1/mcp') || (path.startsWith('/v1/tools') && !isToolExecution);
-    const isBootstrap = BOOTSTRAP_PREFIXES.some((p) => path.startsWith(p)) || isMarketplacePublic;
-    if (isBootstrap) return;
-    await envelopeAuth({
-      getPublicKey: async (agentId) => {
-        const agent = await db.query.agents.findFirst({ where: eq(agents.id, agentId) });
-        if (!agent) return undefined;
-        if (agent.status !== 'active') return undefined;
-        return agent.publicKeyPem;
-      },
-    })(req, reply);
-  });
 
   app.all('/v1/*', async (req, reply) => proxy(req, reply, config));
 }

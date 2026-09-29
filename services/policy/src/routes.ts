@@ -1,68 +1,70 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { and, desc, eq } from 'drizzle-orm';
-import { createHash, randomUUID } from 'node:crypto';
-import { agents, balances, mandates, policyChecks, refusals, vaults, wallets } from '@agentos/db';
-import { sub } from '@agentos/money';
-import { newJti, signBytes, signSpendToken } from '@agentos/auth';
-import { emit } from '@agentos/events';
+import { desc, eq } from 'drizzle-orm';
+import { randomUUID } from 'node:crypto';
+import { agents, mandates, refusals, reservations, transactions, vaults } from '@agentos/db';
+import { validateMoney, sub } from '@agentos/money';
 import { ApiError, idempotencyOnSend, idempotencyPreHandler, type ServiceDeps } from '@agentos/server';
-import { applySpend, canonicalMandate, depthOfAgent, evaluate, reverseSpend, type MandateRow } from '@agentos/mandate';
-import { recoverMessageAddress } from 'viem';
-import { getPolicySigningKey } from './key.js';
+import { canonicalMandate, canonicalSpawn, canonicalWithdraw, MandateClient, recoverEip191, recoverSpendIntentSigner } from '@agentos/onchain';
+import { recoverMessageAddress, type Address } from 'viem';
 
-const TOKEN_TTL_SECONDS = 30;
-const ZERO = '0';
+const BOUNDS: Record<number, string> = {
+  1: 'MandateInactive',
+  2: 'PerTxCapExceeded',
+  3: 'DailyCapExceeded',
+  4: 'LifetimeCapExceeded',
+  5: 'PerSellerCapExceeded',
+  6: 'DepthExceeded',
+  7: 'VaultInsufficient',
+};
+
+function toUnits(amount: string): bigint {
+  const [int = '0', frac = ''] = amount.split('.');
+  return BigInt(int) * 1_000_000n + BigInt(`${frac}000000`.slice(0, 6));
+}
+function fromUnits(units: bigint): string {
+  const n = Number(units) / 1e6;
+  return n.toFixed(2);
+}
 
 const createMandateSchema = z.object({
-  agent_id: z.string().uuid(),
+  owner_address: z.string().regex(/^0x[0-9a-fA-F]{40}$/),
+  operator_address: z.string().regex(/^0x[0-9a-fA-F]{40}$/),
   budget_per_window: z.string().min(1),
   window_seconds: z.number().int().positive(),
   lifetime_cap: z.string().min(1),
-  per_purchase_limit: z.string().min(1),
-  per_seller_limit_bps: z.number().int().min(0).max(10000),
+  per_purchase_cap: z.string().min(1),
+  per_seller_pct: z.number().int().min(0).max(10000),
   max_depth: z.number().int().min(0),
-  operator_address: z.string().regex(/^0x[0-9a-fA-F]{40}$/).optional(),
-  signature: z.string().optional(),
-  chain: z.string().default('sepolia'),
-  created_by: z.string().default('console'),
+  chain_id: z.number().int().default(31337),
+  signature: z.string().min(1),
+});
+
+const spawnSchema = z.object({
+  parent_agent_id: z.string().uuid(),
+  operator_address: z.string().regex(/^0x[0-9a-fA-F]{40}$/),
+  share_percent: z.number().int().min(1).max(100),
+  chain_id: z.number().int().default(31337),
+  signature: z.string().min(1),
 });
 
 const spendIntentSchema = z.object({
   agent_id: z.string().uuid(),
   amount: z.string().min(1),
-  currency: z.string().default('USDC'),
-  category: z.string().default('general'),
-  chain: z.string().optional(),
-  counterparty_id: z.string().uuid().nullable().optional(),
-  tool_id: z.string().optional(),
-  data_offer_id: z.string().optional(),
+  recipient: z.string().regex(/^0x[0-9a-fA-F]{40}$/),
+  nonce: z.number().int().nonnegative(),
+  timestamp: z.number().int().positive(),
+  chain_id: z.number().int().default(31337),
+  signature: z.string().min(1),
 });
 
-const spendCommitSchema = z.object({
-  mandate_id: z.string().uuid(),
-  agent_id: z.string().uuid(),
+const fundSchema = z.object({ amount: z.string().min(1) });
+
+const withdrawSchema = z.object({
   amount: z.string().min(1),
-  seller: z.string().nullable().optional(),
-  vault_available: z.string().optional(),
-  now: z.number().optional(),
-});
-
-const reverseSchema = z.object({
-  mandate_id: z.string().uuid(),
-  amount: z.string().min(1),
-  seller: z.string().nullable().optional(),
-});
-
-const spawnSchema = z.object({
-  parent_agent_id: z.string().uuid(),
-  display_name: z.string().min(1),
-  share_bps: z.number().int().min(1).max(10000),
-  capabilities: z.array(z.string()).optional(),
-});
-
-const resolveSchema = z.object({
-  ref: z.string().min(1),
+  to_address: z.string().regex(/^0x[0-9a-fA-F]{40}$/),
+  chain_id: z.number().int().default(31337),
+  signature: z.string().min(1),
 });
 
 const refusalsQuery = z.object({
@@ -71,271 +73,266 @@ const refusalsQuery = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(50),
 });
 
-function operatorAddressFor(agentId: string): string {
-  return `0x${createHash('sha256').update(`bagseven:operator:${agentId}`).digest('hex').slice(0, 40)}`;
-}
-
-async function getAgent(db: ServiceDeps['db'], agentId: string) {
-  const agent = await db.query.agents.findFirst({ where: eq(agents.id, agentId) });
-  if (!agent) throw new ApiError(404, 'NOT_FOUND', 'agent not found');
-  return agent;
-}
-
-/** Walk to the tree root and load its active mandate. */
-async function getMandateForAgent(db: ServiceDeps['db'], agentId: string): Promise<MandateRow | null> {
-  const { rootAgentId } = await depthOfAgent(db, agentId);
-  return db.query.mandates.findFirst({
-    where: and(eq(mandates.agentId, rootAgentId), eq(mandates.status, 'active')),
-  }) as Promise<MandateRow | null>;
-}
-
-async function getVault(db: ServiceDeps['db'], mandateId: string) {
-  return db.query.vaults.findFirst({ where: eq(vaults.mandateId, mandateId) });
-}
-
-async function vaultAvailable(db: ServiceDeps["db"], vaultId: string): Promise<string> {
-  const vault = await db.query.vaults.findFirst({ where: eq(vaults.id, vaultId) });
-  if (!vault) return ZERO;
-  const bal = await db.query.balances.findFirst({
-    where: and(eq(balances.walletId, vault.walletId), eq(balances.token, 'USDC')),
-  });
-  if (!bal) return ZERO;
-  return sub(bal.amount, bal.reservedAmount);
-}
-
-async function writeAudit(
-  db: ServiceDeps['db'],
-  input: { agentId: string; action: unknown; decision: 'allow' | 'deny'; reason?: string; decisionId: string },
-): Promise<void> {
-  await db.insert(policyChecks).values({
-    agentId: input.agentId,
-    policyVersion: 0,
-    requestedAction: input.action,
-    decision: input.decision,
-    reason: input.reason,
-    decisionId: input.decisionId,
+function mandateClient(config: NodeJS.ProcessEnv): MandateClient {
+  const key = config.ENFORCER_DEV_KEY;
+  if (!key) throw new ApiError(503, 'ENFORCER_UNCONFIGURED', 'ENFORCER_DEV_KEY not set');
+  return new MandateClient(key as `0x${string}`, {
+    rpcUrl: config.RPC_URL ?? 'http://localhost:8545',
+    chainId: Number(config.CHAIN_ID ?? 31337),
   });
 }
 
-async function recordRefusal(
-  db: ServiceDeps['db'],
-  input: { mandateId: string; agentId: string; amount: string; seller: string | null; category: string; chain: string; depth: number; bound: string; reason?: string },
-): Promise<string> {
-  const [row] = await db
-    .insert(refusals)
-    .values({
-      mandateId: input.mandateId,
-      agentId: input.agentId,
-      amount: input.amount,
-      seller: input.seller,
-      category: input.category,
-      chain: input.chain,
-      depth: input.depth,
-      violatedBound: input.bound as never,
-      reason: input.reason,
-    })
-    .returning({ id: refusals.id });
-  if (!row) throw new ApiError(500, 'REFUSAL_FAILED', 'refusal insert returned no row');
-  return row.id;
+/** Owner-key client, used for owner-only on-chain actions (withdraw/revoke). */
+function ownerClient(config: NodeJS.ProcessEnv): MandateClient {
+  const key = config.OWNER_DEV_KEY;
+  if (!key) throw new ApiError(503, 'OWNER_KEY_UNCONFIGURED', 'OWNER_DEV_KEY not set');
+  return new MandateClient(key as `0x${string}`, {
+    rpcUrl: config.RPC_URL ?? 'http://localhost:8545',
+    chainId: Number(config.CHAIN_ID ?? 31337),
+  });
 }
 
 export function buildPolicyRoutes(app: FastifyInstance, { db, redis, config }: ServiceDeps): void {
   app.addHook('preHandler', idempotencyPreHandler(redis));
   app.addHook('onSend', idempotencyOnSend(redis));
 
-  // Create + sign a mandate for a root agent. The operator signs the canonical
-  // bounds once; a new mandate supersedes the previous (never edited).
+  const getMandate = async (id: string) => {
+    const mandate = await db.query.mandates.findFirst({ where: eq(mandates.id, id) });
+    if (!mandate) throw new ApiError(404, 'NOT_FOUND', 'mandate not found');
+    return mandate;
+  };
+
+  // Create + sign a mandate: owner wallet signs the canonical payload (EIP-191),
+  // the backend verifies the signer is the owner, then deploys the BagMandate
+  // contract on-chain — the caps become the immutable, enforced guarantee.
   app.post('/v1/mandates', async (req) => {
     const body = createMandateSchema.parse(req.body);
-    const agent = await getAgent(db, body.agent_id);
-    if (agent.parentAgentId) throw new ApiError(400, 'NOT_ROOT_AGENT', 'only a root agent (no parent) can hold a mandate');
-    if (agent.status !== 'active') throw new ApiError(400, 'AGENT_NOT_ACTIVE', `agent is ${agent.status}`);
+    validateMoney(body.budget_per_window);
+    validateMoney(body.lifetime_cap);
+    validateMoney(body.per_purchase_cap);
 
-    const wallet = await db.query.wallets.findFirst({
-      where: and(eq(wallets.agentId, body.agent_id), eq(wallets.chain, body.chain)),
-    });
-    if (!wallet) throw new ApiError(409, 'NO_WALLET', `agent has no wallet on ${body.chain} — provision one first`);
-
-    const operatorAddress = body.operator_address ?? operatorAddressFor(body.agent_id);
     const canonical = canonicalMandate({
-      agent_id: body.agent_id,
-      operator_address: operatorAddress,
-      budget_per_window: body.budget_per_window,
-      window_seconds: body.window_seconds,
-      lifetime_cap: body.lifetime_cap,
-      per_purchase_limit: body.per_purchase_limit,
-      per_seller_limit_bps: body.per_seller_limit_bps,
-      max_depth: body.max_depth,
-      chain: body.chain,
+      owner: body.owner_address.toLowerCase() as Address,
+      operator: body.operator_address.toLowerCase() as Address,
+      budgetPerWindow: body.budget_per_window,
+      windowSeconds: body.window_seconds,
+      lifetimeCap: body.lifetime_cap,
+      perPurchaseCap: body.per_purchase_cap,
+      perSellerPct: body.per_seller_pct,
+      maxDepth: body.max_depth,
+      chainId: body.chain_id,
     });
-    const { privateKeyPem } = getPolicySigningKey(config);
-
-    // The operator (the connected wallet) signs the canonical payload once via
-    // EIP-191 personal_sign. The recovered signer must be the operator address.
-    let signature: string;
-    if (body.signature) {
-      const recovered = await recoverMessageAddress({
-        message: canonical,
-        signature: body.signature as `0x${string}`,
-      });
-      if (recovered.toLowerCase() !== operatorAddress.toLowerCase()) {
-        throw new ApiError(403, 'SIGNATURE_MISMATCH', 'mandate signature was not produced by the operator address');
-      }
-      signature = body.signature;
-    } else {
-      signature = signBytes(Buffer.from(canonical, 'utf8'), privateKeyPem);
+    const signer = await recoverEip191(canonical, body.signature as `0x${string}`).catch(() => '');
+    if (signer.toLowerCase() !== body.owner_address.toLowerCase()) {
+      throw new ApiError(403, 'SIGNATURE_MISMATCH', 'mandate signature was not produced by the owner address');
     }
 
-    let mandateId: string | undefined;
+    const client = mandateClient(config);
+    const contractAddress = await client.deploy({
+      owner: body.owner_address.toLowerCase() as Address,
+      operator: body.operator_address.toLowerCase() as Address,
+      enforcer: client.address,
+      usdc: (config.USDC_ADDRESS ?? '0x') as Address,
+      budgetPerWindow: toUnits(body.budget_per_window),
+      windowSeconds: body.window_seconds,
+      lifetimeCap: toUnits(body.lifetime_cap),
+      perPurchaseCap: toUnits(body.per_purchase_cap),
+      perSellerPct: body.per_seller_pct,
+      maxDepth: body.max_depth,
+    });
+
+    const mandateId = randomUUID();
+    let rootAgentId: string | undefined;
     await db.transaction(async (tx) => {
-      await tx.update(mandates).set({ status: 'superseded', supersededAt: new Date() }).where(and(eq(mandates.agentId, body.agent_id), eq(mandates.status, 'active')));
-      const [created] = await tx
-        .insert(mandates)
-        .values({
-          agentId: body.agent_id,
-          operatorAddress,
-          budgetPerWindow: body.budget_per_window,
-          windowSeconds: body.window_seconds,
-          lifetimeCap: body.lifetime_cap,
-          perPurchaseLimit: body.per_purchase_limit,
-          perSellerLimitBps: body.per_seller_limit_bps,
-          maxDepth: body.max_depth,
-          chain: body.chain,
-          signature,
-          status: 'active',
-          createdBy: body.created_by,
-        })
-        .returning({ id: mandates.id });
-      if (!created) throw new ApiError(500, 'MANDATE_CREATE_FAILED', 'mandate insert returned no row');
-      mandateId = created.id;
-
-      const existingVault = await tx.query.vaults.findFirst({ where: eq(vaults.rootAgentId, body.agent_id) });
-      if (existingVault) {
-        await tx.update(vaults).set({ mandateId: created.id }).where(eq(vaults.id, existingVault.id));
-      } else {
-        await tx.insert(vaults).values({ mandateId: created.id, rootAgentId: body.agent_id, walletId: wallet.id, chain: body.chain });
-      }
-      await tx.update(agents).set({ mandateId: created.id }).where(eq(agents.id, body.agent_id));
-      await emit(tx, 'mandate.signed', body.agent_id, { mandate_id: created.id, agent_id: body.agent_id });
+      await tx.insert(mandates).values({
+        id: mandateId,
+        ownerAddress: body.owner_address.toLowerCase(),
+        operatorAddress: body.operator_address.toLowerCase(),
+        contractAddress,
+        budgetPerWindow: body.budget_per_window,
+        windowSeconds: body.window_seconds,
+        lifetimeCap: body.lifetime_cap,
+        perPurchaseCap: body.per_purchase_cap,
+        perSellerPct: body.per_seller_pct,
+        maxDepth: body.max_depth,
+        signature: body.signature,
+        status: 'active',
+      });
+      await tx.insert(vaults).values({ mandateId, contractAddress });
+      const [root] = await tx.insert(agents).values({ mandateId, operatorAddress: body.operator_address.toLowerCase(), sharePercent: '100.00', depth: 0, status: 'active' }).returning();
+      if (!root) throw new ApiError(500, 'ROOT_AGENT_FAILED', 'root agent insert returned no row');
+      rootAgentId = root.id;
     });
-    if (!mandateId) throw new ApiError(500, 'MANDATE_CREATE_FAILED', 'mandate missing after transaction');
 
-    return { mandate_id: mandateId, agent_id: body.agent_id, operator_address: operatorAddress, signature, status: 'active' };
+    return { mandate_id: mandateId, root_agent_id: rootAgentId, contract_address: contractAddress, status: 'active' };
   });
 
-  app.get('/v1/mandates/:agentId/active', async (req) => {
-    const { agentId } = req.params as { agentId: string };
-    const mandate = await getMandateForAgent(db, agentId);
-    if (!mandate) throw new ApiError(404, 'NOT_FOUND', 'no active mandate for agent');
-    return { mandate };
+  app.get('/v1/mandates/:id', async (req) => {
+    const { id } = req.params as { id: string };
+    const mandate = await getMandate(id);
+    const client = mandateClient(config);
+    const tree = await db.query.agents.findMany({ where: eq(agents.mandateId, id) });
+    return {
+      mandate: {
+        id: mandate.id,
+        owner_address: mandate.ownerAddress,
+        operator_address: mandate.operatorAddress,
+        contract_address: mandate.contractAddress,
+        budget_per_window: mandate.budgetPerWindow,
+        window_seconds: mandate.windowSeconds,
+        lifetime_cap: mandate.lifetimeCap,
+        per_purchase_cap: mandate.perPurchaseCap,
+        per_seller_pct: mandate.perSellerPct,
+        max_depth: mandate.maxDepth,
+        status: mandate.status,
+      },
+      vault_balance: mandate.contractAddress ? fromUnits(await client.vaultBalance(mandate.contractAddress as Address)) : '0.00',
+      agents: tree,
+    };
   });
 
-  // The hot path: bounds evaluation. No Allow/Deny configuration — only bounds.
-  app.post('/v1/spend-intents', async (req) => {
-    const body = spendIntentSchema.parse(req.body);
-    const chain = body.chain ?? config.DEFAULT_CHAIN ?? 'sepolia';
-    const agent = await getAgent(db, body.agent_id);
-    const now = Date.now();
+  app.get('/v1/mandates/:id/overview', async (req) => {
+    const { id } = req.params as { id: string };
+    const mandate = await getMandate(id);
+    const client = mandateClient(config);
+    const contract = mandate.contractAddress as Address | null;
+    const [vault, windowSpent, lifetimeSpent] = contract
+      ? await Promise.all([client.vaultBalance(contract), client.spendState(contract), client.lifetimeSpent(contract)])
+      : [0n, 0n, 0n];
 
-    const failClosed = async (reason: string) => {
-      const decisionId = randomUUID();
-      await writeAudit(db, { agentId: body.agent_id, action: body, decision: 'deny', reason, decisionId });
-      return { decision: 'refused' as const, decision_id: decisionId, refusal_id: null, violated_bound: null, reason };
-    };
+    const windowLeft = sub(mandate.budgetPerWindow, fromUnits(windowSpent));
+    const lifetimeLeft = sub(mandate.lifetimeCap, fromUnits(lifetimeSpent));
+    const canDraw = Math.min(Number(vault), Number(windowLeft), Number(lifetimeLeft)).toFixed(2);
 
-    if (agent.status !== 'active') return failClosed(`agent not active (${agent.status})`);
-    const mandate = await getMandateForAgent(db, body.agent_id);
-    if (!mandate) return failClosed('no active mandate for agent');
-
-    const { depth, rootAgentId } = await depthOfAgent(db, body.agent_id);
-    const vault = await getVault(db, mandate.id);
-    const available = vault ? await vaultAvailable(db, vault.id) : ZERO;
-    const seller = body.counterparty_id ?? null;
-
-    const result = evaluate({ mandate, amount: body.amount, seller, depth, now, vaultAvailable: available });
-
-    if (!result.ok) {
-      const decisionId = randomUUID();
-      const refusalId = await recordRefusal(db, { mandateId: mandate.id, agentId: body.agent_id, amount: body.amount, seller, category: body.category, chain, depth, bound: result.bound ?? 'vault', reason: result.reason });
-      await writeAudit(db, { agentId: body.agent_id, action: body, decision: 'deny', reason: result.reason, decisionId });
-      await emit(db, 'mandate.refusal.recorded', body.agent_id, { refusal_id: refusalId, decision_id: decisionId, violated_bound: result.bound });
-      return { decision: 'refused' as const, decision_id: decisionId, refusal_id: refusalId, violated_bound: result.bound, reason: result.reason, remaining_window: result.remainingWindow, remaining_lifetime: result.remainingLifetime };
-    }
-
-    const decisionId = randomUUID();
-    const claims = {
-      v: 1 as const,
-      decision_id: decisionId,
-      agent_id: body.agent_id,
-      amount: body.amount,
-      currency: body.currency,
-      chain,
-      category: body.category,
-      counterparty_id: seller,
-      mandate_id: mandate.id,
-      depth,
-      iat: new Date(now).toISOString(),
-      exp: new Date(now + TOKEN_TTL_SECONDS * 1000).toISOString(),
-      jti: newJti(),
-    };
-    const spendToken = signSpendToken(claims, getPolicySigningKey(config).privateKeyPem);
-    await writeAudit(db, { agentId: body.agent_id, action: body, decision: 'allow', decisionId });
-    await emit(db, 'mandate.spend.authorized', body.agent_id, { decision_id: decisionId, amount: body.amount, bound_ok: true });
+    const tree = await db.query.agents.findMany({ where: eq(agents.mandateId, id) });
+    const recentRefusals = await db.query.refusals.findMany({
+      where: eq(refusals.mandateId, id),
+      orderBy: desc(refusals.requestedAt),
+      limit: 5,
+    });
 
     return {
-      decision: 'allow' as const,
-      decision_id: decisionId,
-      spend_token: spendToken,
-      mandate_id: mandate.id,
-      remaining_window: result.remainingWindow,
-      remaining_lifetime: result.remainingLifetime,
-      remaining_vault: result.remainingVault,
-      can_draw: result.canDraw,
-      root_agent_id: rootAgentId,
+      mandate_id: id,
+      spent_this_window: fromUnits(windowSpent),
+      budget_per_window: mandate.budgetPerWindow,
+      spent_total: fromUnits(lifetimeSpent),
+      lifetime_cap: mandate.lifetimeCap,
+      vault_available: fromUnits(vault),
+      can_be_drawn_now: canDraw,
+      agents: tree.map((a) => ({ id: a.id, operator_address: a.operatorAddress, share_percent: a.sharePercent, depth: a.depth, status: a.status })),
+      recent_refusals: recentRefusals,
+      terms: {
+        owner_address: mandate.ownerAddress,
+        operator_address: mandate.operatorAddress,
+        window_seconds: mandate.windowSeconds,
+        per_purchase_cap: mandate.perPurchaseCap,
+        per_seller_pct: mandate.perSellerPct,
+        max_depth: mandate.maxDepth,
+        signed: true,
+      },
     };
   });
 
-  // Treasury calls this at commit: atomic counter increment, mirroring the
-  // on-chain attemptAndCommit. Re-checks every bound against current state.
-  app.post('/v1/spend-commits', async (req) => {
-    const body = spendCommitSchema.parse(req.body);
-    const result = await applySpend(db, body.mandate_id, {
-      amount: body.amount,
-      seller: body.seller ?? null,
-      now: body.now ?? Date.now(),
-      vaultAvailable: body.vault_available ?? ZERO,
-    });
-    if (!result.ok) {
-      const mandate = await db.query.mandates.findFirst({ where: eq(mandates.id, body.mandate_id) });
-      await recordRefusal(db, { mandateId: body.mandate_id, agentId: body.agent_id, amount: body.amount, seller: body.seller ?? null, category: 'general', chain: 'sepolia', depth: 0, bound: result.bound ?? 'vault', reason: result.reason });
-      if (mandate) await emit(db, 'mandate.refusal.recorded', body.agent_id, { refusal_id: null, violated_bound: result.bound });
-    }
-    return { ok: result.ok, bound: result.bound, reason: result.reason, window_spent: result.windowSpent, lifetime_spent: result.lifetimeSpent, remaining_window: result.remainingWindow, remaining_lifetime: result.remainingLifetime };
+  // Spawn a child agent under the mandate tree. Owner-signed; child can only be
+  // narrower than its parent (share ≤ 100) and depth ≤ the mandate's max depth.
+  app.post('/v1/mandates/:id/spawn-agent', async (req) => {
+    const { id } = req.params as { id: string };
+    const body = spawnSchema.parse(req.body);
+    const mandate = await getMandate(id);
+    const parent = await db.query.agents.findFirst({ where: eq(agents.id, body.parent_agent_id) });
+    if (!parent || parent.mandateId !== id) throw new ApiError(404, 'NOT_FOUND', 'parent agent not in this mandate');
+
+    const canonical = canonicalSpawn({ mandateId: id, parentAgentId: body.parent_agent_id, operator: body.operator_address.toLowerCase() as Address, sharePercent: body.share_percent, chainId: body.chain_id });
+    const signer = await recoverEip191(canonical, body.signature as `0x${string}`).catch(() => '');
+    if (signer.toLowerCase() !== mandate.ownerAddress.toLowerCase()) throw new ApiError(403, 'SIGNATURE_MISMATCH', 'spawn was not signed by the owner');
+
+    const depth = parent.depth + 1;
+    if (depth > mandate.maxDepth) throw new ApiError(400, 'EXCEEDS_MAX_DEPTH', `child depth ${depth} exceeds max depth ${mandate.maxDepth}`);
+    if (body.share_percent > 100) throw new ApiError(400, 'CHILD_TOO_WIDE', 'a child mandate can only be narrower than its parent (share ≤ 100%)');
+
+    const [agent] = await db.insert(agents).values({ mandateId: id, parentAgentId: body.parent_agent_id, operatorAddress: body.operator_address.toLowerCase(), sharePercent: String(body.share_percent), depth, status: 'active' }).returning();
+    if (!agent) throw new ApiError(500, 'SPAWN_FAILED', 'agent insert returned no row');
+    return { agent_id: agent.id, depth, share_percent: body.share_percent, parent_agent_id: body.parent_agent_id };
   });
 
-  app.post('/v1/spend-reversals', async (req) => {
-    const body = reverseSchema.parse(req.body);
-    await reverseSpend(db, body.mandate_id, body.amount, body.seller ?? null);
-    return { ok: true };
+  // The hot path. The OPERATOR key signs an EIP-712 spend intent; the backend
+  // verifies the signer is the agent's operator, re-checks the contract, and
+  // executes on-chain. Any bound violation → contract revert → refusal record.
+  app.post('/v1/spend-intents', async (req) => {
+    const body = spendIntentSchema.parse(req.body);
+    const agent = await db.query.agents.findFirst({ where: eq(agents.id, body.agent_id) });
+    if (!agent) throw new ApiError(404, 'NOT_FOUND', 'agent not found');
+    const mandate = await getMandate(agent.mandateId);
+    if (mandate.status !== 'active') throw new ApiError(403, 'MANDATE_INACTIVE', `mandate is ${mandate.status}`);
+    if (!mandate.contractAddress) throw new ApiError(503, 'NO_CONTRACT', 'mandate has no deployed contract');
+
+    const intent = { agentId: body.agent_id, amount: body.amount, recipient: body.recipient as Address, nonce: body.nonce, timestamp: body.timestamp, chainId: body.chain_id };
+    const signer = await recoverSpendIntentSigner(intent, body.signature as `0x${string}`, body.chain_id).catch(() => '');
+    if (signer.toLowerCase() !== agent.operatorAddress.toLowerCase()) throw new ApiError(403, 'OPERATOR_MISMATCH', 'spend intent was not signed by the agent operator');
+
+    const used = await redis.set(`spendnonce:${body.agent_id}:${body.nonce}`, '1', 'EX', 86400, 'NX');
+    if (used !== 'OK') throw new ApiError(409, 'NONCE_REUSED', `nonce ${body.nonce} already used`);
+
+    const client = mandateClient(config);
+    const contract = mandate.contractAddress as Address;
+    const code = await client.check(contract, toUnits(body.amount), body.recipient as Address, agent.depth);
+    const refusalId = randomUUID();
+
+    if (code !== 0) {
+      const bound = BOUNDS[code] ?? 'Unknown';
+      await db.insert(refusals).values({ id: refusalId, mandateId: mandate.id, agentId: agent.id, amount: body.amount, seller: body.recipient, bound, reason: bound });
+      return { decision: 'refused', refusal_id: refusalId, bound, reason: bound };
+    }
+
+    const [reservation] = await db
+      .insert(reservations)
+      .values({ mandateId: mandate.id, agentId: agent.id, amount: body.amount, status: 'reserved', expiresAt: new Date(Date.now() + 60_000) })
+      .returning();
+    if (!reservation) throw new ApiError(500, 'RESERVE_FAILED', 'reservation insert returned no row');
+
+    try {
+      const txHash = await client.execute(contract, toUnits(body.amount), body.recipient as Address, agent.depth);
+      await db.transaction(async (tx) => {
+        await tx.update(reservations).set({ status: 'settled' }).where(eq(reservations.id, reservation.id));
+        await tx.insert(transactions).values({ mandateId: mandate.id, agentId: agent.id, txHash, amount: body.amount, type: 'commit' });
+        const [w, l, s] = await Promise.all([client.spendState(contract), client.lifetimeSpent(contract), client.sellerSpent(contract, body.recipient as Address)]);
+        const sellerSpent = { ...((mandate.sellerSpent as Record<string, string>) ?? {}) };
+        sellerSpent[body.recipient.toLowerCase()] = fromUnits(s);
+        await tx.update(mandates).set({ windowSpent: fromUnits(w), lifetimeSpent: fromUnits(l), sellerSpent }).where(eq(mandates.id, mandate.id));
+      });
+      const [w, l] = await Promise.all([client.spendState(contract), client.lifetimeSpent(contract)]);
+      return {
+        decision: 'allow',
+        reservation_id: reservation.id,
+        tx_hash: txHash,
+        remaining_window: sub(mandate.budgetPerWindow, fromUnits(w)),
+        remaining_lifetime: sub(mandate.lifetimeCap, fromUnits(l)),
+      };
+    } catch (err) {
+      const bound = /(MandateInactive|PerTxCapExceeded|DailyCapExceeded|LifetimeCapExceeded|PerSellerCapExceeded|DepthExceeded|VaultInsufficient)/.exec((err as Error).message)?.[1] ?? 'ExecuteFailed';
+      await db.transaction(async (tx) => {
+        await tx.update(reservations).set({ status: 'released' }).where(eq(reservations.id, reservation.id));
+        await tx.insert(refusals).values({ id: refusalId, mandateId: mandate.id, agentId: agent.id, amount: body.amount, seller: body.recipient, bound, reason: bound });
+      });
+      return { decision: 'refused', refusal_id: refusalId, bound, reason: bound };
+    }
   });
 
   app.get('/v1/refusals', async (req) => {
     const query = refusalsQuery.parse(req.query);
     const where = query.agent_id ? eq(refusals.agentId, query.agent_id) : undefined;
-    const rows = await db.query.refusals.findMany({
-      where,
-      orderBy: desc(refusals.requestedAt),
-      limit: query.limit,
-    });
+    const rows = await db.query.refusals.findMany({ where, orderBy: desc(refusals.requestedAt), limit: query.limit });
     const out = [];
     for (const row of rows) {
       let status: 'standing' | 'released' = 'standing';
-      const mandate = await db.query.mandates.findFirst({ where: eq(mandates.id, row.mandateId) });
-      const vault = await getVault(db, row.mandateId);
-      const available = vault ? await vaultAvailable(db, vault.id) : ZERO;
-      if (mandate) {
-        const nowCheck = evaluate({ mandate, amount: row.amount, seller: row.seller, depth: row.depth, now: Date.now(), vaultAvailable: available });
-        if (nowCheck.ok) status = 'released';
+      const mandate = await getMandate(row.mandateId).catch(() => null);
+      if (mandate?.contractAddress) {
+        try {
+          const code = await mandateClient(config).check(mandate.contractAddress as Address, toUnits(row.amount), (row.seller ?? '0x0000000000000000000000000000000000000000') as Address, 0);
+          if (code === 0) status = 'released';
+        } catch {
+          /* keep standing */
+        }
       }
       out.push({ ...row, status });
     }
@@ -343,160 +340,60 @@ export function buildPolicyRoutes(app: FastifyInstance, { db, redis, config }: S
     return { refusals: scoped, scope: query.scope };
   });
 
-  // Resolve an agent by id, address, or name → mandate + remaining spend.
+  // Resolve an agent by id or operator address → mandate + remaining budget.
   app.get('/v1/resolve', async (req) => {
-    const { ref } = resolveSchema.parse(req.query);
+    const { ref } = z.object({ ref: z.string().min(1) }).parse(req.query);
     const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(ref);
-    let agent = isUuid ? await db.query.agents.findFirst({ where: eq(agents.id, ref) }) : undefined;
-    if (!agent) {
-      const wallet = await db.query.wallets.findFirst({ where: eq(wallets.address, ref.toLowerCase()) });
-      if (wallet) agent = await db.query.agents.findFirst({ where: eq(agents.id, wallet.agentId) });
-    }
-    if (!agent) {
-      agent = await db.query.agents.findFirst({ where: eq(agents.displayName, ref), orderBy: desc(agents.createdAt) });
-    }
-    if (!agent) throw new ApiError(404, 'NOT_FOUND', `no agent found for ref ${ref}`);
-
-    const { depth, rootAgentId } = await depthOfAgent(db, agent.id);
-    const mandate = await getMandateForAgent(db, agent.id);
-    if (!mandate) throw new ApiError(404, 'NOT_FOUND', 'no active mandate for this agent');
-    const vault = await getVault(db, mandate.id);
-    const available = vault ? await vaultAvailable(db, vault.id) : ZERO;
-    const check = evaluate({ mandate, amount: '0', seller: null, depth, now: Date.now(), vaultAvailable: available });
-
+    const agent = isUuid ? await db.query.agents.findFirst({ where: eq(agents.id, ref) }) : await db.query.agents.findFirst({ where: eq(agents.operatorAddress, ref.toLowerCase()) });
+    if (!agent) throw new ApiError(404, 'NOT_FOUND', `no agent found for ${ref}`);
+    const mandate = await getMandate(agent.mandateId);
+    const client = mandateClient(config);
+    const contract = mandate.contractAddress as Address | null;
+    const [vault, w, l] = contract ? await Promise.all([client.vaultBalance(contract), client.spendState(contract), client.lifetimeSpent(contract)]) : [0n, 0n, 0n];
     return {
-      agent: { id: agent.id, display_name: agent.displayName, status: agent.status },
-      depth,
-      root_agent_id: rootAgentId,
-      vault: vault ? { id: vault.id, contract_address: vault.contractAddress } : null,
-      mandate: {
-        id: mandate.id,
-        contract_address: mandate.contractAddress,
-        budget_per_window: mandate.budgetPerWindow,
-        lifetime_cap: mandate.lifetimeCap,
-        per_purchase_limit: mandate.perPurchaseLimit,
-        per_seller_limit_bps: mandate.perSellerLimitBps,
-        max_depth: mandate.maxDepth,
-        operator_address: mandate.operatorAddress,
-      },
-      remaining: { can_draw: check.canDraw, remaining_window: check.remainingWindow, remaining_lifetime: check.remainingLifetime, vault_available: available },
-    };
-  });
-
-  // Spawn a child agent under a mandate tree. Child ≤ Parent: share ≤ 100% and
-  // the child's depth must not exceed the mandate's max depth.
-  app.post('/v1/mandates/:id/spawn-agent', async (req) => {
-    const { id } = req.params as { id: string };
-    const body = spawnSchema.parse(req.body);
-    const mandate = await db.query.mandates.findFirst({ where: and(eq(mandates.id, id), eq(mandates.status, 'active')) });
-    if (!mandate) throw new ApiError(404, 'NOT_FOUND', 'active mandate not found');
-    const parent = await getAgent(db, body.parent_agent_id);
-    const { rootAgentId, depth } = await depthOfAgent(db, body.parent_agent_id);
-    if (rootAgentId !== mandate.agentId) throw new ApiError(400, 'NOT_IN_TREE', 'parent is not in this mandate tree');
-    if (depth + 1 > mandate.maxDepth) throw new ApiError(400, 'EXCEEDS_MAX_DEPTH', `child depth ${depth + 1} exceeds max depth ${mandate.maxDepth}`);
-
-    const [child] = await db
-      .insert(agents)
-      .values({
-        ownerOrgId: parent.ownerOrgId,
-        guardianId: parent.guardianId,
-        parentAgentId: parent.id,
-        mandateId: mandate.id,
-        shareOfParentBps: String(body.share_bps),
-        displayName: body.display_name,
-        status: 'active',
-        apiKeyHash: `child-${randomUUID()}`,
-        publicKeyPem: 'not-applicable',
-      })
-      .returning();
-    if (!child) throw new ApiError(500, 'SPAWN_FAILED', 'child insert returned no row');
-    await emit(db, 'mandate.agent.spawned', child.id, { mandate_id: id, parent_agent_id: parent.id, share_bps: body.share_bps });
-
-    return { agent_id: child.id, parent_agent_id: parent.id, mandate_id: id, depth: depth + 1, share_bps: body.share_bps, status: child.status };
-  });
-
-  // Overview: spent this window / total / can be drawn / agents / refusals / terms.
-  app.get('/v1/mandates/:id/overview', async (req) => {
-    const { id } = req.params as { id: string };
-    const mandate = await db.query.mandates.findFirst({ where: eq(mandates.id, id) });
-    if (!mandate) throw new ApiError(404, 'NOT_FOUND', 'mandate not found');
-
-    const vault = await getVault(db, id);
-    const available = vault ? await vaultAvailable(db, vault.id) : ZERO;
-    const now = Date.now();
-    const check = evaluate({ mandate, amount: '0', seller: null, depth: 0, now, vaultAvailable: available });
-
-    const tree = await db.query.agents.findMany({ where: eq(agents.mandateId, id) });
-    const treeWithDepth = [];
-    for (const agent of tree) {
-      const { depth } = await depthOfAgent(db, agent.id);
-      treeWithDepth.push({ id: agent.id, display_name: agent.displayName, parent_agent_id: agent.parentAgentId, share_bps: agent.shareOfParentBps, depth, status: agent.status });
-    }
-    const recentRefusals = await db.query.refusals.findMany({
-      where: eq(refusals.mandateId, id),
-      orderBy: desc(refusals.requestedAt),
-      limit: 5,
-    });
-
-    // Agents to watch: recently refused, or at/near their share limit or max depth.
-    const agentsToWatch = [];
-    for (const agent of tree) {
-      const { depth } = await depthOfAgent(db, agent.id);
-      if (depth >= mandate.maxDepth && mandate.maxDepth > 0) agentsToWatch.push({ id: agent.id, display_name: agent.displayName, reason: 'at max depth' });
-    }
-    for (const r of recentRefusals) {
-      if (!agentsToWatch.some((a) => a.id === r.agentId)) {
-        const agent = tree.find((a) => a.id === r.agentId);
-        if (agent) agentsToWatch.push({ id: agent.id, display_name: agent.displayName, reason: `recently refused (${r.violatedBound})` });
-      }
-    }
-
-    return {
-      mandate_id: id,
-      root_agent_id: mandate.agentId,
-      contract_address: mandate.contractAddress,
-      spent_this_window: check.currentWindowSpent,
-      budget_per_window: mandate.budgetPerWindow,
-      spent_total: mandate.lifetimeSpent,
-      lifetime_cap: mandate.lifetimeCap,
-      can_be_drawn_now: check.canDraw,
-      vault_available: available,
-      agents: treeWithDepth,
-      agents_to_watch: agentsToWatch,
-      recent_refusals: recentRefusals,
-      terms: {
-        operator_address: mandate.operatorAddress,
-        window_seconds: mandate.windowSeconds,
-        per_purchase_limit: mandate.perPurchaseLimit,
-        per_seller_limit_bps: mandate.perSellerLimitBps,
-        max_depth: mandate.maxDepth,
-        signed: mandate.signature.length > 0,
+      agent: { id: agent.id, operator_address: agent.operatorAddress, depth: agent.depth, share_percent: agent.sharePercent, status: agent.status },
+      mandate: { id: mandate.id, owner_address: mandate.ownerAddress, contract_address: mandate.contractAddress, budget_per_window: mandate.budgetPerWindow, lifetime_cap: mandate.lifetimeCap, per_purchase_cap: mandate.perPurchaseCap, per_seller_pct: mandate.perSellerPct, max_depth: mandate.maxDepth },
+      remaining: {
+        vault_available: fromUnits(vault),
+        remaining_window: sub(mandate.budgetPerWindow, fromUnits(w)),
+        remaining_lifetime: sub(mandate.lifetimeCap, fromUnits(l)),
+        can_draw: Math.min(Number(fromUnits(vault)), Number(sub(mandate.budgetPerWindow, fromUnits(w))), Number(sub(mandate.lifetimeCap, fromUnits(l)))).toFixed(2),
       },
     };
   });
 
-  app.get('/v1/policy-checks/:decisionId', async (req) => {
-    const { decisionId } = req.params as { decisionId: string };
-    const check = await db.query.policyChecks.findFirst({ where: eq(policyChecks.decisionId, decisionId) });
-    if (!check) throw new ApiError(404, 'NOT_FOUND', 'decision not found');
-    return { policy_check: check };
+  // Vault: fund (dev faucet = the backend enforcer key) / withdraw (owner-signed).
+  app.get('/v1/vaults/:mandateId', async (req) => {
+    const { mandateId } = req.params as { mandateId: string };
+    const mandate = await getMandate(mandateId);
+    if (!mandate.contractAddress) throw new ApiError(503, 'NO_CONTRACT', 'no contract');
+    const client = mandateClient(config);
+    return { vault_balance: fromUnits(await client.vaultBalance(mandate.contractAddress as Address)) };
   });
 
-  app.get('/v1/agents/:id/spend-summary', async (req) => {
-    const { id } = req.params as { id: string };
-    const mandate = await getMandateForAgent(db, id);
-    if (!mandate) throw new ApiError(404, 'NOT_FOUND', 'no active mandate for agent');
-    const vault = await getVault(db, mandate.id);
-    const available = vault ? await vaultAvailable(db, vault.id) : ZERO;
-    const check = evaluate({ mandate, amount: '0', seller: null, depth: 0, now: Date.now(), vaultAvailable: available });
-    return {
-      agent_id: id,
-      mandate_id: mandate.id,
-      window_budget: mandate.budgetPerWindow,
-      window_spent: check.currentWindowSpent,
-      lifetime_cap: mandate.lifetimeCap,
-      lifetime_spent: mandate.lifetimeSpent,
-      can_draw: check.canDraw,
-    };
+  app.post('/v1/vaults/:mandateId/fund', async (req) => {
+    const { mandateId } = req.params as { mandateId: string };
+    const body = fundSchema.parse(req.body);
+    validateMoney(body.amount);
+    const mandate = await getMandate(mandateId);
+    if (!mandate.contractAddress) throw new ApiError(503, 'NO_CONTRACT', 'no contract');
+    const client = mandateClient(config);
+    await client.fund(mandate.contractAddress as Address, (config.USDC_ADDRESS ?? '0x') as Address, toUnits(body.amount));
+    await db.insert(transactions).values({ mandateId, amount: body.amount, type: 'fund' });
+    return { vault_balance: fromUnits(await client.vaultBalance(mandate.contractAddress as Address)) };
+  });
+
+  app.post('/v1/vaults/:mandateId/withdraw', async (req) => {
+    const { mandateId } = req.params as { mandateId: string };
+    const body = withdrawSchema.parse(req.body);
+    validateMoney(body.amount);
+    const mandate = await getMandate(mandateId);
+    if (!mandate.contractAddress) throw new ApiError(503, 'NO_CONTRACT', 'no contract');
+    const canonical = canonicalWithdraw({ mandateId, amount: body.amount, to: body.to_address.toLowerCase() as Address, chainId: body.chain_id });
+    const signer = await recoverMessageAddress({ message: canonical, signature: body.signature as `0x${string}` }).catch(() => '');
+    if (signer.toLowerCase() !== mandate.ownerAddress.toLowerCase()) throw new ApiError(403, 'SIGNATURE_MISMATCH', 'withdraw was not signed by the owner');
+    const txHash = await ownerClient(config).withdraw(mandate.contractAddress as Address, toUnits(body.amount), body.to_address.toLowerCase() as Address);
+    await db.insert(transactions).values({ mandateId, amount: body.amount, type: 'withdraw' });
+    return { tx_hash: txHash, vault_balance: fromUnits(await mandateClient(config).vaultBalance(mandate.contractAddress as Address)) };
   });
 }

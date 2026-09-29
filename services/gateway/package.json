@@ -20,7 +20,6 @@
     "start": "node --env-file-if-exists=../../.env dist/index.js"
   },
   "dependencies": {
-    "@agentos/auth": "workspace:*",
     "@agentos/db": "workspace:*",
     "@agentos/server": "workspace:*",
     "@fastify/cors": "^11.3.0",

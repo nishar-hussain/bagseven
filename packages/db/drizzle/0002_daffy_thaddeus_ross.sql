@@ -1,1 +1,0 @@
-ALTER TABLE "guardian_approvals" ADD COLUMN "decision_id" uuid;

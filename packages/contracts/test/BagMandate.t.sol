@@ -2,7 +2,6 @@
 pragma solidity ^0.8.20;
 
 import {Test} from "forge-std/Test.sol";
-import {BagVault} from "../src/BagVault.sol";
 import {BagMandate} from "../src/BagMandate.sol";
 
 contract MockUSDC {
@@ -37,115 +36,192 @@ contract MockUSDC {
 
 contract BagMandateTest is Test {
     MockUSDC usdc;
-    BagVault vault;
     BagMandate mandate;
 
+    address owner = makeAddr("owner");
     address operator = makeAddr("operator");
     address enforcer = makeAddr("enforcer");
     address payee = makeAddr("payee");
+    address stranger = makeAddr("stranger");
 
     function setUp() public {
         usdc = new MockUSDC();
-        vault = new BagVault(address(usdc), operator, enforcer);
         mandate = new BagMandate(
+            owner,
             operator,
+            enforcer,
+            address(usdc),
             20e6, // $20 / window
             86400, // 24h
-            50e6, // $50 lifetime
-            5e6, // $5 per purchase
-            1000, // 10% per seller = $2
-            2, // max depth
-            address(vault),
-            enforcer
+            100e6, // $100 lifetime
+            1e6, // $1 per purchase
+            3500, // 35% of lifetime = $35 / seller
+            3 // max depth
         );
-        vm.prank(enforcer);
-        vault.setMandate(address(mandate));
     }
 
-    function testFundsVaultAndAvailable() public {
-        usdc.mint(operator, 100e6);
-        vm.startPrank(operator);
-        usdc.approve(address(vault), 100e6);
-        vault.deposit(100e6);
+    function fundVault(uint256 amount) internal {
+        usdc.mint(owner, amount);
+        vm.startPrank(owner);
+        usdc.approve(address(mandate), amount);
+        mandate.fund(amount);
         vm.stopPrank();
-        assertEq(vault.available(), 100e6);
     }
 
-    function testReserveLocksButWithdrawDoesNot() public {
-        usdc.mint(operator, 100e6);
-        vm.startPrank(operator);
-        usdc.approve(address(vault), 100e6);
-        vault.deposit(100e6);
-        vm.stopPrank();
-
-        // Reserve $1 — locked, cannot be withdrawn.
-        vm.prank(enforcer);
-        vault.reserve(1e6);
-        assertEq(vault.locked(), 1e6);
-        vm.prank(operator);
-        vm.expectRevert();
-        vault.withdraw(100e6, operator); // available is now 99e6
-        vm.prank(operator);
-        vault.withdraw(99e6, operator);
-        assertEq(usdc.balanceOf(operator), 99e6);
+    function testFundAndVaultBalance() public {
+        fundVault(50e6);
+        assertEq(mandate.vaultBalance(), 50e6);
     }
 
-    function testAttemptAndCommitPaysPayeeAndMovesCounters() public {
-        usdc.mint(operator, 100e6);
-        vm.startPrank(operator);
-        usdc.approve(address(vault), 100e6);
-        vault.deposit(100e6);
-        vm.stopPrank();
-
+    function testExecuteWithinBoundsPaysPayee() public {
+        fundVault(50e6);
         vm.prank(enforcer);
-        vault.reserve(1e6);
-        vm.prank(enforcer);
-        mandate.attemptAndCommit(address(0), 1e6, payee, 0, payee);
+        mandate.execute(5e5, payee, 0); // $0.50
+        assertEq(usdc.balanceOf(payee), 5e5);
+        assertEq(mandate.windowSpent(), 5e5);
+        assertEq(mandate.lifetimeSpent(), 5e5);
+        assertEq(mandate.sellerSpent(payee), 5e5);
+        assertEq(mandate.vaultBalance(), 50e6 - 5e5);
+    }
 
+    function testPerTxCapExceeded() public {
+        fundVault(50e6);
+        vm.prank(enforcer);
+        vm.expectRevert(BagMandate.PerTxCapExceeded.selector);
+        mandate.execute(1e6 + 1, payee, 0); // > $1 cap
+    }
+
+    function testEqualToPerTxCapAllowed() public {
+        fundVault(50e6);
+        vm.prank(enforcer);
+        mandate.execute(1e6, payee, 0); // exactly $1 cap is allowed
         assertEq(usdc.balanceOf(payee), 1e6);
-        assertEq(mandate.windowSpent(), 1e6);
-        assertEq(mandate.lifetimeSpent(), 1e6);
-        assertEq(mandate.sellerSpent(payee), 1e6);
     }
 
-    function testPerPurchaseBoundReverts() public {
-        usdc.mint(operator, 100e6);
-        vm.startPrank(operator);
-        usdc.approve(address(vault), 100e6);
-        vault.deposit(100e6);
-        vm.stopPrank();
-
-        vm.prank(enforcer);
-        vault.reserve(10e6);
-        vm.prank(enforcer);
-        vm.expectRevert(abi.encodeWithSelector(BagMandate.BoundViolation.selector, 3));
-        mandate.attemptAndCommit(address(0), 10e6, payee, 0, payee);
-    }
-
-    function testPerSellerBoundEnforced() public {
-        usdc.mint(operator, 100e6);
-        vm.startPrank(operator);
-        usdc.approve(address(vault), 100e6);
-        vault.deposit(100e6);
-        vm.stopPrank();
-
-        // seller limit = 10% of $20 = $2. Two $1 purchases, then a third reverts.
-        for (uint256 i = 0; i < 2; i++) {
+    function testDailyCapExceeded() public {
+        fundVault(100e6);
+        // 20 x $1 fills the $20 window exactly.
+        for (uint256 i = 0; i < 20; i++) {
             vm.prank(enforcer);
-            vault.reserve(1e6);
-            vm.prank(enforcer);
-            mandate.attemptAndCommit(address(0), 1e6, payee, 0, payee);
+            mandate.execute(1e6, payee, 0);
         }
+        // 21st exceeds → DailyCapExceeded
         vm.prank(enforcer);
-        vault.reserve(1e6);
-        vm.prank(enforcer);
-        vm.expectRevert(abi.encodeWithSelector(BagMandate.BoundViolation.selector, 4));
-        mandate.attemptAndCommit(address(0), 1e6, payee, 0, payee);
+        vm.expectRevert(BagMandate.DailyCapExceeded.selector);
+        mandate.execute(1e6, payee, 0);
     }
 
-    function testNonEnforcerCannotCommit() public {
-        vm.prank(operator);
+    function testLifetimeCapExceeded() public {
+        fundVault(100e6);
+        // 5 windows x 20 x $1 = $100 lifetime. Rotate recipients so the
+        // per-seller cap (35% = $35) never triggers before lifetime.
+        uint256 count = 0;
+        for (uint256 batch = 0; batch < 5; batch++) {
+            for (uint256 i = 0; i < 20; i++) {
+                address r = address(uint160(0x1000 + count));
+                count++;
+                vm.prank(enforcer);
+                mandate.execute(1e6, r, 0);
+            }
+            vm.warp(block.timestamp + 86400); // next window
+        }
+        // Lifetime exhausted → next reverts LifetimeCapExceeded.
+        vm.prank(enforcer);
+        vm.expectRevert(BagMandate.LifetimeCapExceeded.selector);
+        mandate.execute(1e6, address(uint160(0xffff)), 0);
+    }
+
+    function testPerSellerCapExceeded() public {
+        fundVault(50e6);
+        // seller limit = 35% of $100 = $35. Fill windows, all to ONE payee.
+        for (uint256 i = 0; i < 20; i++) {
+            vm.prank(enforcer);
+            mandate.execute(1e6, payee, 0); // window full, seller 20
+        }
+        vm.warp(block.timestamp + 86400);
+        for (uint256 i = 0; i < 15; i++) {
+            vm.prank(enforcer);
+            mandate.execute(1e6, payee, 0); // seller 35
+        }
+        vm.warp(block.timestamp + 86400);
+        // 36th to the same seller exceeds the 35% share → PerSellerCapExceeded
+        vm.prank(enforcer);
+        vm.expectRevert(BagMandate.PerSellerCapExceeded.selector);
+        mandate.execute(1e6, payee, 0);
+    }
+
+    function testDepthExceeded() public {
+        fundVault(10e6);
+        vm.prank(enforcer);
+        vm.expectRevert(BagMandate.DepthExceeded.selector);
+        mandate.execute(5e5, payee, 4); // depth 4 > maxDepth 3
+    }
+
+    function testVaultInsufficient() public {
+        fundVault(5e5); // only $0.50
+        vm.prank(enforcer);
+        vm.expectRevert(BagMandate.VaultInsufficient.selector);
+        mandate.execute(1e6, payee, 0); // $1 > $0.50 balance
+    }
+
+    function testOnlyEnforcerCanExecute() public {
+        fundVault(10e6);
+        vm.prank(stranger);
         vm.expectRevert(BagMandate.Unauthorized.selector);
-        mandate.attemptAndCommit(address(0), 1e6, payee, 0, payee);
+        mandate.execute(5e5, payee, 0);
+    }
+
+    function testOwnerWithdraw() public {
+        fundVault(50e6);
+        vm.prank(owner);
+        mandate.withdraw(20e6, owner);
+        assertEq(usdc.balanceOf(owner), 20e6);
+    }
+
+    function testWithdrawSelfReverts() public {
+        fundVault(50e6);
+        vm.prank(owner);
+        vm.expectRevert(BagMandate.Unauthorized.selector);
+        mandate.withdraw(1e6, address(mandate));
+    }
+
+    function testNonOwnerCannotWithdraw() public {
+        fundVault(50e6);
+        vm.prank(stranger);
+        vm.expectRevert(BagMandate.Unauthorized.selector);
+        mandate.withdraw(1e6, stranger);
+    }
+
+    function testRevokeBlocksExecute() public {
+        fundVault(50e6);
+        vm.prank(owner);
+        mandate.revoke();
+        vm.prank(enforcer);
+        vm.expectRevert(BagMandate.MandateInactive.selector);
+        mandate.execute(5e5, payee, 0);
+    }
+
+    function testWindowResets() public {
+        fundVault(50e6);
+        for (uint256 i = 0; i < 20; i++) {
+            vm.prank(enforcer);
+            mandate.execute(1e6, payee, 0);
+        }
+        vm.warp(block.timestamp + 86400);
+        assertEq(mandate.spendState(), 0);
+        vm.prank(enforcer);
+        mandate.execute(1e6, payee, 0);
+        assertEq(mandate.spendState(), 1e6);
+    }
+
+    function testFuzzNeverOverspends(uint8 amountUnits, uint8 depth) public {
+        vm.assume(amountUnits > 0);
+        fundVault(100e6);
+        vm.prank(enforcer);
+        try mandate.execute(uint256(amountUnits) * 1e3, payee, depth % 4) {} catch {}
+        assertLe(mandate.lifetimeSpent(), mandate.lifetimeCap());
+        assertLe(mandate.windowSpent(), mandate.budgetPerWindow());
+        assertLe(mandate.sellerSpent(payee), mandate.sellerLimit());
+        assertEq(mandate.vaultBalance() + mandate.lifetimeSpent(), 100e6);
     }
 }
