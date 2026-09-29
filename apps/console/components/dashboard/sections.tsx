@@ -430,7 +430,15 @@ export function VaultSection(props: SectionProps) {
   const devFaucet = () =>
     run(`fund vault ${fundAmount} USDC`, async () => {
       if (!session.walletId) throw new Error('provision a wallet first');
-      await client.creditWallet(session.walletId, 'USDC', fundAmount);
+      try {
+        await client.creditWallet(session.walletId, 'USDC', fundAmount);
+      } catch (err) {
+        const code = (err as { code?: string }).code;
+        if (code === 'FUNDING_FAILED') {
+          throw new Error('Dev faucet is out of testnet USDC — click "Connect my wallet" and send USDC from your own wallet instead.', { cause: err });
+        }
+        throw err;
+      }
       persist(await refresh(session));
       toast('ok', `Credited ${fundAmount} USDC (dev faucet)`);
     });
