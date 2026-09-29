@@ -1751,7 +1751,11 @@ export function MarketplaceSection(props: SectionProps) {
         await client.confirmAgent(agent.agent_id, guardian.guardian_token);
         client.setAgent(agent.agent_id, agent.signing_private_key_pem);
         const w = await client.provisionWallet(agent.agent_id, 'sepolia');
-        await client.creditWallet(w.wallet.id, 'USDC', '10.00');
+        try {
+          await client.creditWallet(w.wallet.id, 'USDC', '10.00');
+        } catch {
+          toast('info', 'Demo funding skipped (faucet dry) — the demo agent is ready, fund it to execute paid tools.');
+        }
         const m = await client.createMandate({ agent_id: agent.agent_id, budget_per_window: '10.00', window_seconds: 86400, lifetime_cap: '10.00', per_purchase_limit: '5.00', per_seller_limit_bps: 10000, max_depth: 2 });
         patch = { orgId: org.organization.id, orgName: 'Demo Org', guardianId: guardian.guardian.id, guardianToken: guardian.guardian_token, agentId: agent.agent_id, agentName: 'Demo Agent', apiKey: agent.api_key, signingKeyPem: agent.signing_private_key_pem, agentStatus: 'active', walletId: w.wallet.id, walletAddress: w.wallet.address, mandate: { mandate_id: m.mandate_id, operator_address: m.operator_address, budget_per_window: '10.00', window_seconds: 86400, lifetime_cap: '10.00', per_purchase_limit: '5.00', per_seller_limit_bps: 10000, max_depth: 2, signature: m.signature } };
         agentId = agent.agent_id;

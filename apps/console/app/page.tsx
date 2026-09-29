@@ -5,9 +5,9 @@ import { ConsoleClient } from '../lib/client';
 import { EMPTY_SESSION, type Session, type Toast } from '../lib/types';
 
 import { Header } from '../components/dashboard/header';
-import { OverviewSection, IdentitySection, MandateSection, AgentsSection, VaultSection, RefusalsSection, ResolveSection, SettleSection, MarketplaceSection, ActivitySection, SettingsSection } from '../components/dashboard/sections';
+import { MarketplaceSection } from '../components/dashboard/sections';
 
-export type Section = 'overview' | 'identity' | 'mandate' | 'agents' | 'vault' | 'refusals' | 'resolve' | 'settle' | 'marketplace' | 'activity' | 'settings';
+export type Section = 'marketplace';
 
 let toastId = 0;
 const UI_KEY = 'agentos-console';
@@ -18,7 +18,7 @@ export default function Page() {
   const client = useMemo(() => new ConsoleClient(gateway), [gateway]);
 
   const [session, setSession] = useState<Session>(EMPTY_SESSION);
-  const [activeSection, setActiveSection] = useState<Section>('overview');
+  const [activeSection, setActiveSection] = useState<Section>('marketplace');
 
   const [busy, setBusy] = useState<string | null>(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
@@ -87,24 +87,14 @@ export default function Page() {
     [toast],
   );
 
-  const sectionProps = { session, client, busy, persist, run, toast, onNavigate: (s: string) => setActiveSection(s as Section) };
+  const sectionProps = { session, client, busy, persist, run, toast };
 
   return (
     <div className="min-h-screen bg-[#f5f6f8] text-[#111827] flex flex-col">
       <Header activeSection={activeSection} onSectionChange={setActiveSection} gateway={gateway} agentStatus={session.agentStatus} />
       <main className="flex-1 max-w-[1240px] w-full mx-auto px-6 sm:px-8 py-7">
         <div key={activeSection} className="animate-in fade-in duration-200">
-          {activeSection === 'overview' && <OverviewSection {...sectionProps} />}
-          {activeSection === 'identity' && <IdentitySection {...sectionProps} />}
-          {activeSection === 'mandate' && <MandateSection {...sectionProps} />}
-          {activeSection === 'agents' && <AgentsSection {...sectionProps} />}
-          {activeSection === 'vault' && <VaultSection {...sectionProps} />}
-          {activeSection === 'refusals' && <RefusalsSection {...sectionProps} />}
-          {activeSection === 'resolve' && <ResolveSection {...sectionProps} />}
-          {activeSection === 'settle' && <SettleSection {...sectionProps} />}
-          {activeSection === 'marketplace' && <MarketplaceSection {...sectionProps} />}
-          {activeSection === 'activity' && <ActivitySection {...sectionProps} />}
-          {activeSection === 'settings' && <SettingsSection {...sectionProps} />}
+          <MarketplaceSection {...sectionProps} />
         </div>
       </main>
 
