@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ConsoleClient } from '../lib/client';
 import { EMPTY_SESSION, type Session, type Toast } from '../lib/types';
-import { Sidebar } from '../components/dashboard/sidebar';
+
 import { Header } from '../components/dashboard/header';
 import { OverviewSection, IdentitySection, MandateSection, AgentsSection, VaultSection, RefusalsSection, ResolveSection, SettleSection, MarketplaceSection, ActivitySection, SettingsSection } from '../components/dashboard/sections';
 
@@ -19,7 +19,7 @@ export default function Page() {
 
   const [session, setSession] = useState<Session>(EMPTY_SESSION);
   const [activeSection, setActiveSection] = useState<Section>('overview');
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+
   const [busy, setBusy] = useState<string | null>(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [restored, setRestored] = useState(false);
