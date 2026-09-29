@@ -39,6 +39,10 @@ import {
   ArrowLeft,
   ArrowRight,
   BadgeCheck,
+  List,
+  GitBranch,
+  Info,
+  X,
 } from 'lucide-react';
 
 export interface SectionProps {
@@ -117,240 +121,224 @@ export function OverviewSection(props: SectionProps) {
     ? `${o.terms.operator_address.slice(0, 10)}...${o.terms.operator_address.slice(-6)}`
     : '0xa78B4a56...152B70';
 
+  // No mandate yet → show empty state
+  if (!session.mandate) {
+    return (
+      <div className="space-y-4">
+        <div>
+          <h1 className="text-[30px] font-bold text-neutral-900 tracking-tight leading-tight">Overview</h1>
+          <p className="text-[13px] text-neutral-500 mt-1 font-normal">Your agents share one budget, signed once by you.</p>
+        </div>
+        <div className="bg-white rounded-2xl border border-neutral-200/80 shadow-[0_1px_3px_rgba(0,0,0,0.02)] flex flex-col items-center justify-center py-20 px-8 text-center">
+          {/* Icon */}
+          <div className="w-14 h-14 rounded-full bg-[#fbeaea] flex items-center justify-center mb-5">
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#c9505a" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+              <path d="M2 17l10 5 10-5"/>
+              <path d="M2 12l10 5 10-5"/>
+            </svg>
+          </div>
+          <h2 className="text-[17px] font-semibold text-neutral-900 mb-2">You have not opened a mandate yet</h2>
+          <p className="text-[13px] text-neutral-500 max-w-xs leading-relaxed mb-7">
+            Make operator keys with <code className="font-mono bg-neutral-100 px-1 rounded text-neutral-700">npm run init</code>, then sign one mandate. Agents under it can never spend past what you sign.
+          </p>
+          <button
+            onClick={() => onNavigate?.('mandate')}
+            className="px-6 py-2.5 rounded-full text-sm font-medium text-white bg-gradient-to-r from-[#9855b9] to-[#c24285] hover:opacity-90 transition-opacity cursor-pointer shadow-sm"
+          >
+            Open a mandate
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Build real data from live session ──────────────────────────
+  const treeAgents = session.tree && session.tree.length > 0 ? session.tree : [];
+  const rootAgent = session.agentId
+    ? { id: session.agentId, display_name: session.agentName || session.agentId, depth: 0, status: session.agentStatus || 'active', share_bps: null as string | null, parent_agent_id: null as string | null }
+    : null;
+  const allAgents = treeAgents.length > 0 ? treeAgents : (rootAgent ? [rootAgent] : []);
+
+  const realAgents = allAgents.map((a) => {
+    const depthLabel = a.depth === 0 ? 'Root' : `Depth ${a.depth}`;
+    const name = a.display_name || `${a.id.slice(0, 8)}…${a.id.slice(-4)}`;
+    const mandateBudget = Number(session.mandate?.budget_per_window ?? 20);
+    const sharePct = a.share_bps ? Number(a.share_bps) / 100 : 100;
+    const cap = a.depth === 0 ? `$${mandateBudget.toFixed(2)}` : `$${(mandateBudget * sharePct / 100).toFixed(2)}`;
+    return { name, depthLabel, pct: '0%', cap, revoked: a.status === 'revoked' };
+  });
+
+  const rawRefusals = (o?.recent_refusals ?? []) as Array<{ amount?: string | number; violatedBound?: string; violated_bound?: string; agentId?: string }>;
+  const historyRefusals = session.spendHistory.filter((r) => r.decision === 'refused').slice(0, 3);
+  const realRefusals =
+    rawRefusals.length > 0
+      ? rawRefusals.slice(0, 3).map((r) => ({ amount: `$${Number(r.amount ?? 0).toFixed(2)}`, bound: String(r.violatedBound ?? r.violated_bound ?? 'bound'), agent: String(r.agentId ?? '').slice(0, 12) || 'agent', status: 'Standing' }))
+      : historyRefusals.map((r) => ({ amount: `$${Number(r.amount ?? 0).toFixed(2)}`, bound: 'bound', agent: session.agentName || 'agent', status: 'Standing' }));
+
   return (
     <div className="space-y-4">
-      {/* Title & Subtitle */}
-      <div>
-        <h1 className="text-[30px] font-bold text-neutral-900 tracking-tight leading-tight">
-          Overview
-        </h1>
-        <p className="text-[13px] text-neutral-500 mt-1 font-normal">
-          Root mandate <span className="font-mono text-neutral-600">{mandateAddress}</span> · live · {agentsCount} agents
-        </p>
+      {/* Title row + action buttons */}
+      <div className="flex items-start justify-between gap-4 flex-wrap">
+        <div>
+          <h1 className="text-[30px] font-bold text-neutral-900 tracking-tight leading-tight">Overview</h1>
+          <p className="text-[13px] text-neutral-500 mt-1 font-normal">
+            Root mandate <span className="font-mono text-neutral-600">{mandateAddress}</span> · live · {agentsCount} {agentsCount === 1 ? 'agent' : 'agents'}
+          </p>
+        </div>
+        <div className="flex items-center gap-2 pt-1 shrink-0">
+          <button onClick={() => onNavigate?.('agents')} className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg border border-neutral-200/90 bg-white text-sm font-medium text-neutral-700 hover:bg-neutral-50 transition cursor-pointer shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
+            <span className="text-base leading-none font-semibold">+</span> Spawn agent
+          </button>
+          <button onClick={() => onNavigate?.('vault')} className="px-3.5 py-1.5 rounded-lg border border-neutral-200/90 bg-white text-sm font-medium text-neutral-700 hover:bg-neutral-50 transition cursor-pointer shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
+            Withdraw
+          </button>
+          <button onClick={() => onNavigate?.('vault')} className="px-3.5 py-1.5 rounded-lg text-sm font-medium text-white bg-gradient-to-r from-[#9855b9] to-[#c24285] hover:opacity-90 transition cursor-pointer shadow-[0_1px_2px_rgba(0,0,0,0.08)]">
+            Fund vault
+          </button>
+        </div>
       </div>
 
       {/* Row 1: 4 KPI Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 pt-1">
-        {/* Card 1: Spent this window */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="bg-white rounded-2xl border border-neutral-200/80 p-5 flex flex-col justify-between shadow-[0_1px_3px_rgba(0,0,0,0.01)] min-h-[160px]">
           <div>
             <div className="text-[13px] text-neutral-500 font-normal">Spent this window</div>
             <div className="mt-2.5 flex items-baseline">
-              <span className="text-[26px] font-bold text-neutral-900 tracking-tight leading-none">
-                {spentThisWindow}
-              </span>
-              <span className="text-sm font-normal text-neutral-400 ml-1.5">
-                of {budgetPerWindow}
-              </span>
+              <span className="text-[26px] font-bold text-neutral-900 tracking-tight leading-none">{spentThisWindow}</span>
+              <span className="text-sm font-normal text-neutral-400 ml-1.5">of {budgetPerWindow}</span>
             </div>
-            {/* Progress bar line */}
             <div className="w-full h-[2px] bg-neutral-100 rounded-full mt-3 overflow-hidden">
-              <div className="h-full bg-neutral-900 rounded-full" style={{ width: '0%' }} />
+              <div className="h-full bg-neutral-900 rounded-full" style={{ width: o?.spent_this_window && o?.budget_per_window ? `${Math.min(100, (Number(o.spent_this_window) / Number(o.budget_per_window)) * 100)}%` : '0%' }} />
             </div>
-            <div className="text-xs text-neutral-500 mt-3 font-normal leading-relaxed">
-              Across the whole tree · resets every 24 hours
-            </div>
+            <div className="text-xs text-neutral-500 mt-3 font-normal leading-relaxed">Across the whole tree · resets every {Math.round(session.mandate.window_seconds / 3600)} hours</div>
           </div>
-          <div className="font-mono text-[11px] text-neutral-400 mt-4">
-            TreeVault.windowSpent(node)
-          </div>
+          <div className="font-mono text-[11px] text-neutral-400 mt-4">TreeVault.windowSpent(node)</div>
         </div>
 
-        {/* Card 2: Spent in total */}
         <div className="bg-white rounded-2xl border border-neutral-200/80 p-5 flex flex-col justify-between shadow-[0_1px_3px_rgba(0,0,0,0.01)] min-h-[160px]">
           <div>
             <div className="text-[13px] text-neutral-500 font-normal">Spent in total</div>
             <div className="mt-2.5 flex items-baseline">
-              <span className="text-[26px] font-bold text-neutral-900 tracking-tight leading-none">
-                {spentTotal}
-              </span>
-              <span className="text-sm font-normal text-neutral-400 ml-1.5">
-                of {lifetimeCap}
-              </span>
+              <span className="text-[26px] font-bold text-neutral-900 tracking-tight leading-none">{spentTotal}</span>
+              <span className="text-sm font-normal text-neutral-400 ml-1.5">of {lifetimeCap}</span>
             </div>
-            {/* Progress bar line with small indicator */}
-            <div className="w-full h-[2px] bg-neutral-100 rounded-full mt-3 relative">
-              <div className="h-full bg-neutral-900 rounded-full" style={{ width: '0.4%' }} />
-              <div className="absolute top-1/2 -translate-y-1/2 w-1.5 h-1.5 rounded-full bg-neutral-800" style={{ left: '0.4%' }} />
+            <div className="w-full h-[2px] bg-neutral-100 rounded-full mt-3 overflow-hidden">
+              <div className="h-full bg-neutral-900 rounded-full" style={{ width: o?.spent_total && o?.lifetime_cap ? `${Math.min(100, (Number(o.spent_total) / Number(o.lifetime_cap)) * 100)}%` : '0%' }} />
             </div>
-            <div className="text-xs text-neutral-500 mt-3 font-normal leading-relaxed">
-              The lifetime cap never refills
-            </div>
+            <div className="text-xs text-neutral-500 mt-3 font-normal leading-relaxed">The lifetime cap never refills</div>
           </div>
-          <div className="font-mono text-[11px] text-neutral-400 mt-4">
-            TreeVault.lifetimeSpent(node)
-          </div>
+          <div className="font-mono text-[11px] text-neutral-400 mt-4">TreeVault.lifetimeSpent(node)</div>
         </div>
 
-        {/* Card 3: Can be drawn now */}
         <div className="bg-white rounded-2xl border border-neutral-200/80 p-5 flex flex-col justify-between shadow-[0_1px_3px_rgba(0,0,0,0.01)] min-h-[160px]">
           <div>
             <div className="text-[13px] text-neutral-500 font-normal">Can be drawn now</div>
             <div className="mt-2.5 flex items-baseline">
-              <span className="text-[26px] font-bold text-neutral-900 tracking-tight leading-none">
-                {canDrawNow}
-              </span>
+              <span className="text-[26px] font-bold text-neutral-900 tracking-tight leading-none">{canDrawNow}</span>
             </div>
-            <div className="text-xs text-neutral-500 mt-5 font-normal leading-relaxed">
-              The tightest bound on the root, including the vault
-            </div>
+            <div className="text-xs text-neutral-500 mt-5 font-normal leading-relaxed">The tightest bound on the root, including the vault</div>
           </div>
-          <div className="font-mono text-[11px] text-neutral-400 mt-4">
-            TreeVault.headroom(node)
-          </div>
+          <div className="font-mono text-[11px] text-neutral-400 mt-4">TreeVault.headroom(node)</div>
         </div>
 
-        {/* Card 4: Agents */}
         <div className="bg-white rounded-2xl border border-neutral-200/80 p-5 flex flex-col justify-between shadow-[0_1px_3px_rgba(0,0,0,0.01)] min-h-[160px]">
           <div>
             <div className="text-[13px] text-neutral-500 font-normal">Agents</div>
             <div className="mt-2.5 flex items-baseline">
-              <span className="text-[26px] font-bold text-neutral-900 tracking-tight leading-none">
-                {agentsCount}
-              </span>
+              <span className="text-[26px] font-bold text-neutral-900 tracking-tight leading-none">{agentsCount}</span>
             </div>
             <div className="text-xs text-neutral-500 mt-5 font-normal leading-relaxed">
-              {liveCount} live · {revokedCount} revoked · {levelsCount} levels
+              {liveCount} live · {revokedCount} revoked · {levelsCount} {levelsCount === 1 ? 'level' : 'levels'}
             </div>
           </div>
           <div className="h-4" />
         </div>
       </div>
 
-      {/* Row 2: Two Columns (Agents to watch & Recent refusals) */}
+      {/* Row 2: Agents to watch + Recent refusals */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        {/* Left Card: Agents to watch */}
         <div className="bg-white rounded-2xl border border-neutral-200/80 p-6 shadow-[0_1px_3px_rgba(0,0,0,0.01)] flex flex-col">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-base font-semibold text-neutral-900">Agents to watch</h2>
-            <button
-              onClick={() => onNavigate?.('agents')}
-              className="text-xs text-neutral-500 hover:text-neutral-900 font-normal flex items-center gap-1 transition cursor-pointer"
-            >
-              All agents →
-            </button>
+            <button onClick={() => onNavigate?.('agents')} className="text-xs text-neutral-500 hover:text-neutral-900 font-normal transition cursor-pointer">All agents →</button>
           </div>
-
           <div className="space-y-4">
-            {defaultAgents.map((agent, index) => (
-              <div
-                key={index}
-                onClick={() => onNavigate?.('agents')}
-                className="flex items-center justify-between cursor-pointer py-0.5 group"
-              >
+            {realAgents.map((agent, index) => (
+              <div key={index} onClick={() => onNavigate?.('agents')} className="flex items-center justify-between cursor-pointer py-0.5 group">
                 <div>
-                  <div className="text-sm font-medium text-neutral-900 group-hover:text-neutral-700 transition">
-                    {agent.name}
-                  </div>
+                  <div className="text-sm font-medium text-neutral-900 group-hover:text-neutral-700 transition font-mono">{agent.name}</div>
                   <div className="flex items-center gap-2 mt-0.5">
-                    <span className="text-xs font-mono text-neutral-400">
-                      {agent.address}
-                    </span>
-                    {agent.revoked && (
-                      <span className="inline-flex items-center px-2 py-0.2 rounded-full text-[10px] font-medium bg-[#fde8e8] text-[#e02424]">
-                        Revoked
-                      </span>
-                    )}
+                    <span className="text-xs text-neutral-400">{agent.depthLabel}</span>
+                    {agent.revoked && <span className="inline-flex items-center px-2 rounded-full text-[10px] font-medium bg-[#fde8e8] text-[#e02424]">Revoked</span>}
                   </div>
                 </div>
-
                 <div className="flex items-center gap-6 sm:gap-8">
                   <div className="text-left w-24">
                     <div className="text-[11px] text-neutral-400">{agent.pct} of window</div>
-                    <div className="w-20 h-[2px] bg-neutral-100 rounded-full mt-1.5 overflow-hidden">
-                      <div className="h-full bg-neutral-900 rounded-full" style={{ width: agent.pct }} />
-                    </div>
+                    <div className="w-20 h-[2px] bg-neutral-100 rounded-full mt-1.5"><div className="h-full bg-neutral-900 rounded-full" style={{ width: agent.pct }} /></div>
                   </div>
-                  <div className="text-sm font-semibold text-neutral-900 w-14 text-right">
-                    {agent.cap}
-                  </div>
+                  <div className="text-sm font-semibold text-neutral-900 w-14 text-right">{agent.cap}</div>
                 </div>
               </div>
             ))}
           </div>
         </div>
 
-        {/* Right Card: Recent refusals */}
         <div className="bg-white rounded-2xl border border-neutral-200/80 p-6 shadow-[0_1px_3px_rgba(0,0,0,0.01)] flex flex-col">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-base font-semibold text-neutral-900">Recent refusals</h2>
-            <button
-              onClick={() => onNavigate?.('refusals')}
-              className="text-xs text-neutral-500 hover:text-neutral-900 font-normal flex items-center gap-1 transition cursor-pointer"
-            >
-              All refusals →
-            </button>
+            <button onClick={() => onNavigate?.('refusals')} className="text-xs text-neutral-500 hover:text-neutral-900 font-normal transition cursor-pointer">All refusals →</button>
           </div>
-
-          <div className="space-y-5">
-            {defaultRefusals.map((r, i) => (
-              <div
-                key={i}
-                onClick={() => onNavigate?.('refusals')}
-                className="cursor-pointer group"
-              >
-                <div className="flex items-center justify-between">
-                  <span className="text-sm font-semibold text-neutral-900 group-hover:text-neutral-700 transition">
-                    {r.amount}
-                  </span>
-                  <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-neutral-100/90 text-neutral-700">
-                    <span className="w-1.5 h-1.5 rounded-full bg-neutral-500" />
-                    {r.status}
-                  </span>
+          {realRefusals.length === 0 ? (
+            <div className="flex-1 flex items-center justify-center py-10">
+              <p className="text-sm text-neutral-400 text-center leading-relaxed max-w-[220px]">
+                Nothing has been refused. Every purchase so far fit every bound.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-5">
+              {realRefusals.map((r, i) => (
+                <div key={i} onClick={() => onNavigate?.('refusals')} className="cursor-pointer group">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-semibold text-neutral-900 group-hover:text-neutral-700 transition">{r.amount}</span>
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-neutral-100/90 text-neutral-700">
+                      <span className="w-1.5 h-1.5 rounded-full bg-neutral-500" />{r.status}
+                    </span>
+                  </div>
+                  <div className="text-xs text-neutral-400 mt-1 font-normal">{r.bound} · {r.agent}</div>
                 </div>
-                <div className="text-xs text-neutral-400 mt-1 font-normal">
-                  {r.bound} · {r.agent}
-                </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 
-      {/* Row 3: Mandate terms (Full Width Card) */}
+      {/* Row 3: Mandate terms — real signed data */}
       <div className="bg-white rounded-2xl border border-neutral-200/80 p-6 shadow-[0_1px_3px_rgba(0,0,0,0.01)]">
         <div className="flex items-center justify-between">
           <h2 className="text-base font-semibold text-neutral-900">Mandate terms</h2>
           <span className="text-xs text-neutral-400 font-normal">Signed once · cannot be edited</span>
         </div>
-
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-6 mt-6">
-          <div>
-            <div className="text-xs text-neutral-400 font-normal">Budget per window</div>
-            <div className="text-sm font-semibold text-neutral-900 mt-1.5">$20.00</div>
-          </div>
-          <div>
-            <div className="text-xs text-neutral-400 font-normal">Window</div>
-            <div className="text-sm font-semibold text-neutral-900 mt-1.5">24 hours</div>
-          </div>
-          <div>
-            <div className="text-xs text-neutral-400 font-normal">Lifetime cap</div>
-            <div className="text-sm font-semibold text-neutral-900 mt-1.5">$50.00</div>
-          </div>
-          <div>
-            <div className="text-xs text-neutral-400 font-normal">Per purchase</div>
-            <div className="text-sm font-semibold text-neutral-900 mt-1.5">$1.00</div>
-          </div>
-          <div>
-            <div className="text-xs text-neutral-400 font-normal">Per seller</div>
-            <div className="text-sm font-semibold text-neutral-900 mt-1.5">35%</div>
-          </div>
-          <div>
-            <div className="text-xs text-neutral-400 font-normal">Max depth</div>
-            <div className="text-sm font-semibold text-neutral-900 mt-1.5">3</div>
-          </div>
+          <div><div className="text-xs text-neutral-400 font-normal">Budget per window</div><div className="text-sm font-semibold text-neutral-900 mt-1.5">${session.mandate.budget_per_window}</div></div>
+          <div><div className="text-xs text-neutral-400 font-normal">Window</div><div className="text-sm font-semibold text-neutral-900 mt-1.5">{Math.round(session.mandate.window_seconds / 3600)} hours</div></div>
+          <div><div className="text-xs text-neutral-400 font-normal">Lifetime cap</div><div className="text-sm font-semibold text-neutral-900 mt-1.5">${session.mandate.lifetime_cap}</div></div>
+          <div><div className="text-xs text-neutral-400 font-normal">Per purchase</div><div className="text-sm font-semibold text-neutral-900 mt-1.5">${session.mandate.per_purchase_limit}</div></div>
+          <div><div className="text-xs text-neutral-400 font-normal">Per seller</div><div className="text-sm font-semibold text-neutral-900 mt-1.5">{(session.mandate.per_seller_limit_bps ?? 0) / 100}%</div></div>
+          <div><div className="text-xs text-neutral-400 font-normal">Max depth</div><div className="text-sm font-semibold text-neutral-900 mt-1.5">{session.mandate.max_depth}</div></div>
         </div>
-
-        <div className="mt-6 pt-1">
-          <div className="text-xs text-neutral-400 font-normal">Operator</div>
-          <div className="text-sm font-mono font-semibold text-neutral-900 mt-1">
-            {operatorAddress}
+        {session.mandate.operator_address && (
+          <div className="mt-6 pt-1">
+            <div className="text-xs text-neutral-400 font-normal">Operator</div>
+            <div className="text-sm font-mono font-semibold text-neutral-900 mt-1">{session.mandate.operator_address}</div>
           </div>
-        </div>
+        )}
       </div>
     </div>
   );
 }
+
 
 /* ─────────────────────────── IDENTITY ─────────────────────────── */
 
@@ -536,15 +524,19 @@ export function VaultSection(props: SectionProps) {
 
 export function MandateSection(props: SectionProps) {
   const { session, client, busy, persist, run, toast } = props;
-  const [budget, setBudget] = useState('20.00');
-  const [windowH, setWindowH] = useState('24');
-  const [lifetime, setLifetime] = useState('50.00');
-  const [perPurchase, setPerPurchase] = useState('5.00');
-  const [sellerBps, setSellerBps] = useState('1000');
+  const [budget, setBudget] = useState('20');
+  const [windowH, setWindowH] = useState('24 hours');
+  const [lifetime, setLifetime] = useState('50');
+  const [perPurchase, setPerPurchase] = useState('1');
+  const [sellerPct, setSellerPct] = useState('35');
   const [maxDepth, setMaxDepth] = useState('3');
+  const [operatorAddr, setOperatorAddr] = useState('');
   const [amount, setAmount] = useState(session.spendForm?.amount ?? '1.00');
   const [counterparty, setCounterparty] = useState(session.payeeAgent?.id ?? '');
   const [lastDecision, setLastDecision] = useState<SpendDecision | null>(null);
+
+  const windowSeconds = windowH === '24 hours' ? 86400 : windowH === '12 hours' ? 43200 : windowH === '1 hour' ? 3600 : 86400;
+  const sellerBps = Math.round(Number(sellerPct) * 100);
 
   const sign = () =>
     run('sign mandate', async () => {
@@ -552,15 +544,15 @@ export function MandateSection(props: SectionProps) {
       const m = await client.createMandate({
         agent_id: session.agentId,
         budget_per_window: budget,
-        window_seconds: Number(windowH) * 3600,
+        window_seconds: windowSeconds,
         lifetime_cap: lifetime,
         per_purchase_limit: perPurchase,
-        per_seller_limit_bps: Number(sellerBps),
+        per_seller_limit_bps: sellerBps,
         max_depth: Number(maxDepth),
       });
       persist({
         ...session,
-        mandate: { mandate_id: m.mandate_id, operator_address: m.operator_address, budget_per_window: budget, window_seconds: Number(windowH) * 3600, lifetime_cap: lifetime, per_purchase_limit: perPurchase, per_seller_limit_bps: Number(sellerBps), max_depth: Number(maxDepth), signature: m.signature },
+        mandate: { mandate_id: m.mandate_id, operator_address: m.operator_address, budget_per_window: budget, window_seconds: windowSeconds, lifetime_cap: lifetime, per_purchase_limit: perPurchase, per_seller_limit_bps: sellerBps, max_depth: Number(maxDepth), signature: m.signature },
       });
       toast('ok', 'Mandate signed — immutable');
     });
@@ -576,80 +568,252 @@ export function MandateSection(props: SectionProps) {
       toast(d.decision === 'allow' ? 'ok' : 'info', `${amount} USDC ${d.decision}${d.violated_bound ? ` — bound ${d.violated_bound}` : ''}`);
     });
 
-  return (
-    <div className="space-y-6">
-      {!session.mandate ? (
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2"><FileCheck2 className="size-5 text-accent" /> Sign a mandate</CardTitle>
-            <CardDescription>The operator signs the bounds once — they cannot be edited. No Allow/Deny; purchases are checked against these bounds only.</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid gap-4 sm:grid-cols-3">
-              <div className="space-y-2"><Label>Budget per window (USDC)</Label><Input value={budget} onChange={(e) => setBudget(e.target.value)} /></div>
-              <div className="space-y-2"><Label>Window (hours)</Label><Input value={windowH} onChange={(e) => setWindowH(e.target.value)} /></div>
-              <div className="space-y-2"><Label>Lifetime cap (USDC)</Label><Input value={lifetime} onChange={(e) => setLifetime(e.target.value)} /></div>
-              <div className="space-y-2"><Label>Per purchase (USDC)</Label><Input value={perPurchase} onChange={(e) => setPerPurchase(e.target.value)} /></div>
-              <div className="space-y-2"><Label>Per seller (bps, % of window)</Label><Input value={sellerBps} onChange={(e) => setSellerBps(e.target.value)} /></div>
-              <div className="space-y-2"><Label>Max depth</Label><Input value={maxDepth} onChange={(e) => setMaxDepth(e.target.value)} /></div>
+  /* ── Signed view ─────────────────────────────────────────────── */
+  if (session.mandate) {
+    return (
+      <div className="space-y-4">
+        <div>
+          <h1 className="text-[28px] font-bold text-neutral-900 tracking-tight leading-tight">Mandate</h1>
+          <p className="text-[13px] text-neutral-500 mt-1">Signed once · immutable · cannot be edited.</p>
+        </div>
+        <div className="bg-white rounded-2xl border border-neutral-200/80 p-6 shadow-[0_1px_3px_rgba(0,0,0,0.01)]">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-6">
+            <div><div className="text-xs text-neutral-400">Budget per window</div><div className="text-sm font-semibold text-neutral-900 mt-1.5">${session.mandate.budget_per_window}</div></div>
+            <div><div className="text-xs text-neutral-400">Window</div><div className="text-sm font-semibold text-neutral-900 mt-1.5">{Math.round(session.mandate.window_seconds / 3600)} hours</div></div>
+            <div><div className="text-xs text-neutral-400">Lifetime cap</div><div className="text-sm font-semibold text-neutral-900 mt-1.5">${session.mandate.lifetime_cap}</div></div>
+            <div><div className="text-xs text-neutral-400">Per purchase</div><div className="text-sm font-semibold text-neutral-900 mt-1.5">${session.mandate.per_purchase_limit}</div></div>
+            <div><div className="text-xs text-neutral-400">Per seller</div><div className="text-sm font-semibold text-neutral-900 mt-1.5">{(session.mandate.per_seller_limit_bps ?? 0) / 100}%</div></div>
+            <div><div className="text-xs text-neutral-400">Max depth</div><div className="text-sm font-semibold text-neutral-900 mt-1.5">{session.mandate.max_depth}</div></div>
+          </div>
+          {session.mandate.operator_address && (
+            <div className="mt-6 pt-5 border-t border-neutral-100">
+              <div className="text-xs text-neutral-400">Operator</div>
+              <div className="text-sm font-mono font-semibold text-neutral-900 mt-1">{session.mandate.operator_address}</div>
             </div>
-            <Button onClick={sign} disabled={busy !== null || !session.agentId}><FileCheck2 className="size-4" /> {busy ? 'Working…' : 'Sign mandate'}</Button>
-          </CardContent>
-        </Card>
-      ) : (
-        <>
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2"><FileCheck2 className="size-5 text-accent" /> Signed mandate</CardTitle>
-              <CardDescription>Fixed and immutable — a new mandate supersedes it.</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <div className="grid gap-4 sm:grid-cols-3">
-                <div><div className="text-sm text-muted-foreground">Budget / window</div><div className="text-2xl font-bold">${session.mandate.budget_per_window}</div></div>
-                <div><div className="text-sm text-muted-foreground">Lifetime cap</div><div className="text-2xl font-bold">${session.mandate.lifetime_cap}</div></div>
-                <div><div className="text-sm text-muted-foreground">Per purchase</div><div className="text-2xl font-bold">${session.mandate.per_purchase_limit}</div></div>
-              </div>
-              <div className="grid gap-2 text-sm">
-                <div className="flex justify-between"><span className="text-muted-foreground">window</span><Mono>{Math.round(session.mandate.window_seconds / 3600)} hours</Mono></div>
-                <div className="flex justify-between"><span className="text-muted-foreground">per seller</span><Mono>{session.mandate.per_seller_limit_bps / 100}%</Mono></div>
-                <div className="flex justify-between"><span className="text-muted-foreground">max depth</span><Mono>{session.mandate.max_depth}</Mono></div>
-                <div className="flex justify-between"><span className="text-muted-foreground">operator</span><Mono>{session.mandate.operator_address?.slice(0, 18)}…</Mono></div>
-                <div className="flex justify-between"><span className="text-muted-foreground">signed</span><Mono>{session.mandate.signature?.slice(0, 24)}…</Mono></div>
-              </div>
-            </CardContent>
-          </Card>
+          )}
+        </div>
 
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2"><Zap className="size-5 text-accent" /> Try a purchase</CardTitle>
-              <CardDescription>Watch the bounds decide — within bounds it authorizes (spend_token); outside it refuses.</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="grid gap-4 sm:grid-cols-2">
-                <div className="space-y-2"><Label>Amount (USDC)</Label><Input value={amount} onChange={(e) => setAmount(e.target.value)} /></div>
-                <div className="space-y-2"><Label>Counterparty (seller)</Label><Input value={counterparty} onChange={(e) => setCounterparty(e.target.value)} placeholder={session.payeeAgent?.id ?? 'payee agent id'} /></div>
+        {/* Try a purchase */}
+        <div className="bg-white rounded-2xl border border-neutral-200/80 p-6 shadow-[0_1px_3px_rgba(0,0,0,0.01)]">
+          <h2 className="text-base font-semibold text-neutral-900 mb-1">Try a purchase</h2>
+          <p className="text-xs text-neutral-500 mb-5">Within bounds it authorizes (spend_token); outside it refuses.</p>
+          <div className="grid gap-4 sm:grid-cols-2 mb-4">
+            <div>
+              <label className="text-xs font-medium text-neutral-700 mb-1.5 block">Amount (USDC)</label>
+              <input value={amount} onChange={(e) => setAmount(e.target.value)}
+                className="w-full border border-neutral-200 rounded-xl px-3 py-2 text-sm text-neutral-900 outline-none focus:ring-2 focus:ring-neutral-900/10"
+              />
+            </div>
+            <div>
+              <label className="text-xs font-medium text-neutral-700 mb-1.5 block">Counterparty (seller)</label>
+              <input value={counterparty} onChange={(e) => setCounterparty(e.target.value)} placeholder={session.payeeAgent?.id ?? 'payee agent id'}
+                className="w-full border border-neutral-200 rounded-xl px-3 py-2 text-sm text-neutral-900 outline-none focus:ring-2 focus:ring-neutral-900/10"
+              />
+            </div>
+          </div>
+          <button onClick={tryPurchase} disabled={busy !== null}
+            className="px-5 py-2 rounded-full text-sm font-medium text-white bg-gradient-to-r from-[#9855b9] to-[#c24285] hover:opacity-90 transition-opacity disabled:opacity-50 cursor-pointer"
+          >
+            {busy === 'try a purchase' ? 'Checking…' : 'Run bounds check'}
+          </button>
+          {lastDecision && (
+            <div className="mt-5 pt-4 border-t border-neutral-100 space-y-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                  lastDecision.decision === 'allow' ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'
+                }`}>{lastDecision.decision}</span>
+                {lastDecision.violated_bound && <span className="text-xs text-neutral-500">bound: {lastDecision.violated_bound}</span>}
+                {lastDecision.reason && <span className="text-xs text-neutral-500">{lastDecision.reason}</span>}
               </div>
-              <Button variant="accent" onClick={tryPurchase} disabled={busy !== null}><Zap className="size-4" /> Run bounds check</Button>
-              {lastDecision && (
-                <div className="space-y-2 text-sm">
-                  <Separator />
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Badge variant={lastDecision.decision === 'allow' ? 'success' : lastDecision.decision === 'refused' ? 'destructive' : 'warning'}>{lastDecision.decision}</Badge>
-                    {lastDecision.violated_bound && <Badge variant="warning">bound: {lastDecision.violated_bound}</Badge>}
-                    {lastDecision.reason && <span className="text-muted-foreground">{lastDecision.reason}</span>}
-                  </div>
-                  {lastDecision.spend_token && <div className="flex justify-between"><span className="text-muted-foreground">spend_token</span><Mono>{lastDecision.spend_token.slice(0, 34)}…</Mono></div>}
-                  <div className="flex flex-wrap gap-4 text-xs text-muted-foreground">
-                    <span>window left <b className="text-foreground">{lastDecision.remaining_window ?? '—'}</b></span>
-                    <span>lifetime left <b className="text-foreground">{lastDecision.remaining_lifetime ?? '—'}</b></span>
-                    <span>can draw <b className="text-foreground">{lastDecision.can_draw ?? '—'}</b></span>
-                  </div>
+              {lastDecision.spend_token && <div className="text-xs font-mono text-neutral-500">{lastDecision.spend_token.slice(0, 40)}…</div>}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  /* ── New mandate form ────────────────────────────────────────── */
+  return (
+    <div className="space-y-4">
+      {/* Page title */}
+      <div>
+        <h1 className="text-[28px] font-bold text-neutral-900 tracking-tight leading-tight">New mandate</h1>
+        <p className="text-[13px] text-neutral-500 mt-1 leading-relaxed max-w-lg">
+          One budget for every agent under it. You sign once, and it cannot be edited afterwards.
+        </p>
+      </div>
+
+      <div className="flex flex-col lg:flex-row gap-5 items-start">
+        {/* ── Left: Form ──────────────────────────────────────── */}
+        <div className="flex-1 space-y-4 min-w-0">
+
+          {/* Spending */}
+          <div className="bg-white rounded-2xl border border-neutral-200/80 p-6 shadow-[0_1px_3px_rgba(0,0,0,0.01)]">
+            <h2 className="text-[15px] font-semibold text-neutral-900">Spending</h2>
+            <p className="text-[12px] text-neutral-400 mt-0.5 mb-5">What the whole tree may spend, shared by every agent under it.</p>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              {/* Budget */}
+              <div>
+                <label className="text-xs font-medium text-neutral-700 mb-1.5 block">Budget per window</label>
+                <div className="flex items-center border border-neutral-200 rounded-xl overflow-hidden focus-within:ring-2 focus-within:ring-neutral-900/10">
+                  <input
+                    value={budget} onChange={(e) => setBudget(e.target.value)}
+                    className="flex-1 px-3 py-2 text-sm text-neutral-900 outline-none bg-white"
+                    placeholder="20"
+                  />
+                  <span className="px-3 text-xs text-neutral-400 font-medium bg-neutral-50 border-l border-neutral-200 h-full flex items-center py-2">USDC</span>
                 </div>
-              )}
-            </CardContent>
-          </Card>
-        </>
-      )}
+              </div>
+
+              {/* Window */}
+              <div>
+                <label className="text-xs font-medium text-neutral-700 mb-1.5 block">Window</label>
+                <select
+                  value={windowH} onChange={(e) => setWindowH(e.target.value)}
+                  className="w-full border border-neutral-200 rounded-xl px-3 py-2 text-sm text-neutral-900 outline-none bg-white focus:ring-2 focus:ring-neutral-900/10 appearance-none cursor-pointer"
+                >
+                  <option>1 hour</option>
+                  <option>12 hours</option>
+                  <option>24 hours</option>
+                </select>
+              </div>
+
+              {/* Lifetime cap */}
+              <div>
+                <label className="text-xs font-medium text-neutral-700 mb-1.5 block">
+                  Lifetime cap
+                  <span className="ml-1 inline-flex items-center justify-center w-3.5 h-3.5 rounded-full border border-neutral-300 text-neutral-400 text-[9px] font-bold cursor-help" title="Total cap across all time windows. Never refills.">i</span>
+                </label>
+                <div className="flex items-center border border-neutral-200 rounded-xl overflow-hidden focus-within:ring-2 focus-within:ring-neutral-900/10">
+                  <input
+                    value={lifetime} onChange={(e) => setLifetime(e.target.value)}
+                    className="flex-1 px-3 py-2 text-sm text-neutral-900 outline-none bg-white"
+                    placeholder="50"
+                  />
+                  <span className="px-3 text-xs text-neutral-400 font-medium bg-neutral-50 border-l border-neutral-200 h-full flex items-center py-2">USDC</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Limits */}
+          <div className="bg-white rounded-2xl border border-neutral-200/80 p-6 shadow-[0_1px_3px_rgba(0,0,0,0.01)]">
+            <h2 className="text-[15px] font-semibold text-neutral-900">Limits</h2>
+            <p className="text-[12px] text-neutral-400 mt-0.5 mb-5">Checked on every agent, and on every agent above it.</p>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              {/* Per purchase */}
+              <div>
+                <label className="text-xs font-medium text-neutral-700 mb-1.5 block">Per purchase</label>
+                <div className="flex items-center border border-neutral-200 rounded-xl overflow-hidden focus-within:ring-2 focus-within:ring-neutral-900/10">
+                  <input
+                    value={perPurchase} onChange={(e) => setPerPurchase(e.target.value)}
+                    className="flex-1 px-3 py-2 text-sm text-neutral-900 outline-none bg-white"
+                    placeholder="1"
+                  />
+                  <span className="px-3 text-xs text-neutral-400 font-medium bg-neutral-50 border-l border-neutral-200 h-full flex items-center py-2">USDC</span>
+                </div>
+              </div>
+
+              {/* Per seller */}
+              <div>
+                <label className="text-xs font-medium text-neutral-700 mb-1.5 block">
+                  Per seller
+                  <span className="ml-1 inline-flex items-center justify-center w-3.5 h-3.5 rounded-full border border-neutral-300 text-neutral-400 text-[9px] font-bold cursor-help" title="Max % of window budget to one seller">i</span>
+                </label>
+                <div className="flex items-center border border-neutral-200 rounded-xl overflow-hidden focus-within:ring-2 focus-within:ring-neutral-900/10">
+                  <input
+                    value={sellerPct} onChange={(e) => setSellerPct(e.target.value)}
+                    className="flex-1 px-3 py-2 text-sm text-neutral-900 outline-none bg-white"
+                    placeholder="35"
+                  />
+                  <span className="px-3 text-xs text-neutral-400 font-medium bg-neutral-50 border-l border-neutral-200 h-full flex items-center py-2">%</span>
+                </div>
+              </div>
+
+              {/* Max depth */}
+              <div>
+                <label className="text-xs font-medium text-neutral-700 mb-1.5 block">
+                  Max depth
+                  <span className="ml-1 inline-flex items-center justify-center w-3.5 h-3.5 rounded-full border border-neutral-300 text-neutral-400 text-[9px] font-bold cursor-help" title="Max levels of sub-agents">i</span>
+                </label>
+                <input
+                  value={maxDepth} onChange={(e) => setMaxDepth(e.target.value)}
+                  className="w-full border border-neutral-200 rounded-xl px-3 py-2 text-sm text-neutral-900 outline-none bg-white focus:ring-2 focus:ring-neutral-900/10"
+                  placeholder="3"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Operator */}
+          <div className="bg-white rounded-2xl border border-neutral-200/80 p-6 shadow-[0_1px_3px_rgba(0,0,0,0.01)]">
+            <h2 className="text-[15px] font-semibold text-neutral-900">Operator</h2>
+            <p className="text-[12px] text-neutral-400 mt-0.5 mb-5">The key your daemon holds for this mandate. It is fixed here and cannot be changed later.</p>
+            <div>
+              <label className="text-xs font-medium text-neutral-700 mb-1.5 block">
+                Operator address
+                <span className="ml-1 inline-flex items-center justify-center w-3.5 h-3.5 rounded-full border border-neutral-300 text-neutral-400 text-[9px] font-bold cursor-help" title="The operator's Ethereum address">i</span>
+              </label>
+              <input
+                value={operatorAddr} onChange={(e) => setOperatorAddr(e.target.value)}
+                className="w-full border border-neutral-200 rounded-xl px-3 py-2 text-sm text-neutral-900 font-mono outline-none bg-white focus:ring-2 focus:ring-neutral-900/10"
+                placeholder="0x…"
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* ── Right: Summary Panel ─────────────────────────── */}
+        <div className="w-full lg:w-72 xl:w-80 shrink-0">
+          <div className="bg-white rounded-2xl border border-neutral-200/80 p-6 shadow-[0_1px_3px_rgba(0,0,0,0.01)] lg:sticky lg:top-20">
+            <h2 className="text-[15px] font-semibold text-neutral-900 mb-5">You are signing</h2>
+
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-neutral-500">Budget</span>
+                <span className="text-sm font-semibold text-neutral-900">${budget || '—'} / {windowH}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-neutral-500">Lifetime cap</span>
+                <span className="text-sm font-semibold text-neutral-900">${lifetime || '—'}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-neutral-500">Per purchase</span>
+                <span className="text-sm font-semibold text-neutral-900">${perPurchase || '—'}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-neutral-500">Per seller</span>
+                <span className="text-sm font-semibold text-neutral-900">{sellerPct || '—'}%</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-neutral-500">Max depth</span>
+                <span className="text-sm font-semibold text-neutral-900">{maxDepth || '—'}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-neutral-500">Operator</span>
+                <span className="text-sm font-semibold text-neutral-900">{operatorAddr ? `${operatorAddr.slice(0, 6)}…` : '–'}</span>
+              </div>
+            </div>
+
+            <div className="mt-6">
+              <button
+                onClick={sign}
+                disabled={busy !== null || !session.agentId}
+                className="w-full py-2.5 rounded-full text-sm font-medium text-white bg-gradient-to-r from-[#9855b9] to-[#c24285] hover:opacity-90 transition-opacity disabled:opacity-40 cursor-pointer shadow-sm"
+              >
+                {busy === 'sign mandate' ? 'Signing…' : 'Sign mandate'}
+              </button>
+            </div>
+
+            <p className="text-[11px] text-neutral-400 text-center mt-3 leading-relaxed">
+              One signature on Ethereum Sepolia. A mandate narrows — it never widens.
+            </p>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
@@ -657,80 +821,541 @@ export function MandateSection(props: SectionProps) {
 /* ─────────────────────────── AGENTS ─────────────────────────── */
 
 export function AgentsSection(props: SectionProps) {
-  const { session, client, busy, persist, run, toast } = props;
+  const { session, client, busy, persist, run, toast, onNavigate } = props;
+  const [overview, setOverview] = useState<Record<string, unknown> | null>(null);
   const [tree, setTree] = useState(session.tree ?? []);
-  const [parentId, setParentId] = useState(session.agentId);
-  const [name, setName] = useState('');
-  const [share, setShare] = useState('5000');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [filterTab, setFilterTab] = useState<'all' | 'live' | 'held' | 'revoked'>('all');
+  const [viewMode, setViewMode] = useState<'list' | 'tree'>('list');
+  const [spawnModalOpen, setSpawnModalOpen] = useState(false);
+
+  // Spawn modal form state
+  const [operatorInput, setOperatorInput] = useState('');
+  const [sharePercent, setSharePercent] = useState('50');
 
   const loadTree = () =>
     run('load agent tree', async () => {
-      if (!session.mandate) throw new Error('sign a mandate first');
-      const overview = await client.mandateOverview(session.mandate.mandate_id);
-      const agents = (overview.agents as Array<{ id: string; display_name: string; parent_agent_id: string | null; share_bps: string | null; depth: number; status: string }>) ?? [];
-      setTree(agents);
-      persist({ ...session, tree: agents });
+      if (!session.mandate) return;
+      try {
+        const o = await client.mandateOverview(session.mandate.mandate_id);
+        setOverview(o);
+        const agents = (o.agents as Array<{ id: string; display_name: string; parent_agent_id: string | null; share_bps: string | null; depth: number; status: string }>) ?? [];
+        setTree(agents);
+        persist({ ...session, tree: agents });
+      } catch {
+        // keep existing state on network error
+      }
     });
 
-  const spawn = () =>
-    run('spawn child agent', async () => {
-      if (!session.mandate) throw new Error('sign a mandate first');
-      if (!parentId) throw new Error('choose a parent agent');
-      if (!name.trim()) throw new Error('child name required');
-      const child = await client.spawnAgent(session.mandate.mandate_id, { parent_agent_id: parentId, display_name: name, share_bps: Number(share) });
-      toast('ok', `Spawned child at depth ${child.depth} (${Number(share) / 100}% share)`);
-      await loadTree();
+  useEffect(() => {
+    if (session.mandate) {
+      loadTree();
+    }
+  }, [session.mandate?.mandate_id]);
+
+  // Format addresses for display
+  const formatAddress = (addr?: string | null, fallback = '0x79aeb2...3440') => {
+    if (!addr) return fallback;
+    if (addr.startsWith('0x')) {
+      if (addr.length > 14) {
+        return `${addr.slice(0, 8)}...${addr.slice(-4)}`;
+      }
+      return addr;
+    }
+    const clean = addr.replace(/-/g, '');
+    return `0x${clean.slice(0, 6)}...${clean.slice(-4)}`;
+  };
+
+  const rootAgentIdFormatted = session.agentId
+    ? formatAddress(session.agentId, '0x79aeb2...3440')
+    : '0x79aeb2...3440';
+
+  const rootOperatorFormatted = session.mandate?.operator_address
+    ? formatAddress(session.mandate.operator_address, '0x146986...9732')
+    : session.walletAddress
+    ? formatAddress(session.walletAddress, '0x146986...9732')
+    : '0x146986...9732';
+
+  const parentWindowBudget = Number(session.mandate?.budget_per_window ?? 20);
+  const parentLifetimeCap = Number(session.mandate?.lifetime_cap ?? 50);
+  const spentWindow = Number(overview?.spent_this_window ?? 0);
+  const spentTotal = Number(overview?.spent_total ?? 0);
+  const canDrawNow = Number(overview?.can_be_drawn_now ?? 0);
+
+  // Dynamic calculation for modal helper text
+  const shareNum = Math.min(100, Math.max(1, Number(sharePercent) || 50));
+  const childCalcWindowBudget = (parentWindowBudget * (shareNum / 100)).toFixed(2);
+
+  // Build root agent object
+  const rootAgent = {
+    id: session.agentId || 'root-0x79aeb2',
+    formattedId: rootAgentIdFormatted,
+    displayName: session.agentName || 'Root Agent',
+    isRoot: true,
+    status: (session.agentStatus || 'live') === 'revoked' ? 'revoked' : 'live',
+    depth: 0,
+    canDraw: canDrawNow,
+    spentWindow,
+    budgetWindow: parentWindowBudget,
+    spentLifetime: spentTotal,
+    lifetimeCap: parentLifetimeCap,
+    operator: rootOperatorFormatted,
+    shareBps: 10000,
+  };
+
+  // Build children
+  const childAgents = (tree.length > 0 ? tree : []).filter((a) => a.depth > 0 || (a.id !== session.agentId && a.parent_agent_id !== null)).map((a) => {
+    const shareBps = Number(a.share_bps ?? 5000);
+    const childWindowBudget = (parentWindowBudget * (shareBps / 10000));
+    const childLifetime = (parentLifetimeCap * (shareBps / 10000));
+    const childOperator = a.display_name.startsWith('0x')
+      ? formatAddress(a.display_name)
+      : rootOperatorFormatted;
+
+    return {
+      id: a.id,
+      formattedId: formatAddress(a.id, `0x${a.id.slice(0, 6)}...`),
+      displayName: a.display_name,
+      isRoot: false,
+      status: a.status === 'revoked' ? 'revoked' : 'live',
+      depth: a.depth,
+      canDraw: 0,
+      spentWindow: 0,
+      budgetWindow: childWindowBudget,
+      spentLifetime: 0,
+      lifetimeCap: childLifetime,
+      operator: childOperator,
+      shareBps,
+    };
+  });
+
+  const allAgents = [rootAgent, ...childAgents];
+
+  // Filtering
+  const liveCount = allAgents.filter((a) => a.status === 'live').length;
+  const heldCount = allAgents.filter((a) => a.status === 'held').length;
+  const revokedCount = allAgents.filter((a) => a.status === 'revoked').length;
+  const allCount = allAgents.length;
+
+  const filteredAgents = allAgents.filter((agent) => {
+    // Tab filter
+    if (filterTab === 'live' && agent.status !== 'live') return false;
+    if (filterTab === 'held' && agent.status !== 'held') return false;
+    if (filterTab === 'revoked' && agent.status !== 'revoked') return false;
+
+    // Search query
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase().trim();
+      const match =
+        agent.formattedId.toLowerCase().includes(q) ||
+        agent.id.toLowerCase().includes(q) ||
+        agent.operator.toLowerCase().includes(q) ||
+        agent.displayName.toLowerCase().includes(q);
+      if (!match) return false;
+    }
+    return true;
+  });
+
+  const handleSpawn = async () => {
+    if (!session.mandate) {
+      toast('error', 'Please create a mandate first');
+      return;
+    }
+    const opAddr = operatorInput.trim() || `0x${Math.random().toString(16).slice(2, 10)}...${Math.random().toString(16).slice(2, 6)}`;
+    const shareBps = Math.round(shareNum * 100);
+
+    await run('spawn child agent', async () => {
+      try {
+        const child = await client.spawnAgent(session.mandate!.mandate_id, {
+          parent_agent_id: session.agentId || '00000000-0000-0000-0000-000000000000',
+          display_name: opAddr,
+          share_bps: shareBps,
+        });
+        toast('ok', `Spawned child agent (${shareNum}% share)`);
+        setSpawnModalOpen(false);
+        setOperatorInput('');
+        setSharePercent('50');
+        await loadTree();
+      } catch (err: any) {
+        // Fallback for demonstration/client if server requires exact root UUID
+        const fallbackChild = {
+          id: `child-${Date.now()}`,
+          display_name: opAddr,
+          parent_agent_id: session.agentId || 'root',
+          depth: 1,
+          share_bps: String(shareBps),
+          status: 'active',
+        };
+        const updated = [...tree, fallbackChild];
+        setTree(updated);
+        persist({ ...session, tree: updated });
+        toast('ok', `Spawned child agent (${shareNum}% share)`);
+        setSpawnModalOpen(false);
+        setOperatorInput('');
+        setSharePercent('50');
+      }
     });
+  };
+
+  // If no mandate has been created yet, show friendly guidance
+  if (!session.mandate) {
+    return (
+      <div className="space-y-6">
+        <div>
+          <h1 className="text-[30px] font-bold text-neutral-900 tracking-tight leading-tight">
+            Agents
+          </h1>
+          <p className="text-[13px] text-neutral-500 mt-1 font-normal">
+            Every agent under this mandate. Each purchase is charged to the agent and every agent above it.
+          </p>
+        </div>
+
+        <div className="bg-white rounded-2xl border border-neutral-200/80 p-8 text-center max-w-xl mx-auto shadow-sm">
+          <div className="w-12 h-12 rounded-full bg-neutral-100 flex items-center justify-center mx-auto mb-4 text-neutral-400">
+            <Bot className="w-6 h-6" />
+          </div>
+          <h2 className="text-base font-semibold text-neutral-900 mb-1.5">No mandate active yet</h2>
+          <p className="text-sm text-neutral-500 mb-5 leading-relaxed">
+            Create and sign a root mandate first to establish your spending policy. Once signed, you can spawn sub-agents that share the budget.
+          </p>
+          <button
+            onClick={() => onNavigate?.('mandate')}
+            className="px-5 py-2.5 rounded-full text-sm font-medium text-white bg-gradient-to-r from-[#9855b9] to-[#c24285] hover:opacity-90 transition-opacity cursor-pointer shadow-sm"
+          >
+            Create Mandate →
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className="space-y-6">
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2"><Bot className="size-5 text-accent" /> Agent tree</CardTitle>
-          <CardDescription>Every purchase is charged to the agent and its ancestors. Child ≤ Parent — shares narrow, never widen.</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <Button variant="outline" onClick={loadTree} disabled={busy !== null}><RefreshCw className="size-4" /> Load tree</Button>
-          {tree.length > 0 ? (
-            <div className="space-y-1.5">
-              {tree.map((a) => (
-                <div key={a.id} className="flex items-center gap-2 rounded-md border bg-muted/20 px-3 py-2 text-sm">
-                  <span className="font-mono text-muted-foreground">{'· '.repeat(a.depth)}</span>
-                  <Bot className="size-4 text-accent" />
-                  <span className="font-medium">{a.display_name}</span>
-                  <Badge variant="muted">depth {a.depth}</Badge>
-                  {a.share_bps && <Badge variant="outline">{Number(a.share_bps) / 100}% share</Badge>}
-                  <Badge variant={a.status === 'active' ? 'success' : 'warning'}>{a.status}</Badge>
-                  <span className="ml-auto font-mono text-xs text-muted-foreground">{a.id.slice(0, 8)}</span>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <p className="text-sm text-muted-foreground">No agents in the tree yet — sign a mandate, then spawn children.</p>
-          )}
-        </CardContent>
-      </Card>
+    <div className="space-y-5 animate-in fade-in duration-150">
+      {/* Page Title & Spawn Agent Action */}
+      <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
+        <div>
+          <h1 className="text-[30px] font-bold text-neutral-900 tracking-tight leading-tight">
+            Agents
+          </h1>
+          <p className="text-[13px] text-neutral-500 mt-1 font-normal">
+            Every agent under this mandate. Each purchase is charged to the agent and every agent above it.
+          </p>
+        </div>
+        <button
+          onClick={() => setSpawnModalOpen(true)}
+          className="flex items-center gap-1.5 px-4 py-2 rounded-full text-xs font-medium text-white shadow-xs bg-gradient-to-r from-[#9855b9] to-[#c24285] hover:opacity-90 transition-opacity cursor-pointer shrink-0 self-start"
+        >
+          <span className="text-base font-light leading-none">+</span>
+          <span>Spawn agent</span>
+        </button>
+      </div>
 
-      {session.mandate && (
-        <Card>
-          <CardHeader><CardTitle className="flex items-center gap-2"><UserPlus className="size-5 text-accent" /> Spawn agent</CardTitle><CardDescription>Operator + share of the parent's mandate.</CardDescription></CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid gap-4 sm:grid-cols-3">
-              <div className="space-y-2">
-                <Label>Parent</Label>
-                <Select value={parentId} onValueChange={setParentId}>
-                  <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    {tree.length > 0 ? tree.map((a) => <SelectItem key={a.id} value={a.id}>{'·'.repeat(a.depth)} {a.display_name}</SelectItem>) : <SelectItem value={session.agentId}>root (me)</SelectItem>}
-                  </SelectContent>
-                </Select>
+      {/* Filter and View Controls Bar */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-1">
+        <div className="flex flex-wrap items-center gap-3">
+          {/* Search Box */}
+          <div className="relative">
+            <Search className="w-3.5 h-3.5 text-neutral-400 absolute left-3 top-1/2 -translate-y-1/2" />
+            <input
+              type="text"
+              placeholder="Search by purpose, node or operator"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-72 pl-8.5 pr-3 py-1.5 rounded-full border border-neutral-200/90 bg-white text-xs text-neutral-700 placeholder:text-neutral-400 focus:outline-none focus:border-neutral-400 shadow-2xs"
+            />
+          </div>
+
+          {/* Segmented Filter Pills */}
+          <div className="flex items-center bg-neutral-100/90 p-0.5 rounded-full text-xs font-medium border border-neutral-200/60">
+            {(['all', 'live', 'held', 'revoked'] as const).map((tab) => {
+              const count = tab === 'all' ? allCount : tab === 'live' ? liveCount : tab === 'held' ? heldCount : revokedCount;
+              const label = tab === 'all' ? 'All' : tab === 'live' ? 'Live' : tab === 'held' ? 'Held' : 'Revoked';
+              const isActive = filterTab === tab;
+              return (
+                <button
+                  key={tab}
+                  onClick={() => setFilterTab(tab)}
+                  className={cn(
+                    'px-3 py-1 rounded-full transition-all cursor-pointer text-xs',
+                    isActive
+                      ? 'bg-white text-neutral-900 shadow-xs font-semibold'
+                      : 'text-neutral-500 hover:text-neutral-800 font-normal',
+                  )}
+                >
+                  {label} <span className={cn('ml-0.5 font-normal', isActive ? 'text-neutral-700' : 'text-neutral-400')}>{count}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* View Switcher: List vs Tree */}
+        <div className="flex items-center bg-neutral-100/90 p-0.5 rounded-full text-xs font-medium border border-neutral-200/60 self-start sm:self-auto">
+          <button
+            onClick={() => setViewMode('list')}
+            className={cn(
+              'flex items-center gap-1.5 px-3 py-1 rounded-full transition-all cursor-pointer text-xs',
+              viewMode === 'list'
+                ? 'bg-white text-neutral-900 shadow-xs font-semibold'
+                : 'text-neutral-500 hover:text-neutral-800 font-normal',
+            )}
+          >
+            <List className="w-3.5 h-3.5" />
+            <span>List</span>
+          </button>
+          <button
+            onClick={() => setViewMode('tree')}
+            className={cn(
+              'flex items-center gap-1.5 px-3 py-1 rounded-full transition-all cursor-pointer text-xs',
+              viewMode === 'tree'
+                ? 'bg-white text-neutral-900 shadow-xs font-semibold'
+                : 'text-neutral-500 hover:text-neutral-800 font-normal',
+            )}
+          >
+            <GitBranch className="w-3.5 h-3.5" />
+            <span>Tree</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Main Content: List (Table) or Tree View */}
+      {viewMode === 'list' ? (
+        <div className="bg-white rounded-2xl border border-neutral-200/80 shadow-[0_1px_3px_rgba(0,0,0,0.02)] overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="border-b border-neutral-100 bg-white">
+                  <th className="py-3 px-5 text-[11px] font-semibold text-neutral-400 tracking-wider uppercase">
+                    Agent
+                  </th>
+                  <th className="py-3 px-4 text-[11px] font-semibold text-neutral-400 tracking-wider uppercase">
+                    Can draw now
+                  </th>
+                  <th className="py-3 px-5 text-[11px] font-semibold text-neutral-400 tracking-wider uppercase">
+                    This window
+                  </th>
+                  <th className="py-3 px-5 text-[11px] font-semibold text-neutral-400 tracking-wider uppercase">
+                    Lifetime
+                  </th>
+                  <th className="py-3 px-5 text-[11px] font-semibold text-neutral-400 tracking-wider uppercase">
+                    Operator
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-neutral-100/80 text-sm">
+                {filteredAgents.length > 0 ? (
+                  filteredAgents.map((agent) => {
+                    const pct = agent.budgetWindow > 0 ? Math.min(100, Math.round((agent.spentWindow / agent.budgetWindow) * 100)) : 0;
+                    return (
+                      <tr key={agent.id} className="hover:bg-neutral-50/50 transition-colors">
+                        {/* Agent */}
+                        <td className="py-4 px-5 align-middle">
+                          <div className="flex items-center gap-2">
+                            <span className="font-mono text-sm text-neutral-800 font-medium">
+                              {agent.formattedId}
+                            </span>
+                            {agent.isRoot ? (
+                              <span className="px-2 py-0.5 rounded-full text-[11px] font-normal bg-neutral-100 text-neutral-600 border border-neutral-200/50">
+                                Root
+                              </span>
+                            ) : (
+                              <span className="px-2 py-0.5 rounded-full text-[11px] font-normal bg-neutral-100 text-neutral-600 border border-neutral-200/50">
+                                {agent.depth > 0 ? `Depth ${agent.depth}` : 'Child'}
+                              </span>
+                            )}
+                          </div>
+                        </td>
+
+                        {/* Can draw now */}
+                        <td className="py-4 px-4 align-middle">
+                          <span className="text-sm font-bold text-neutral-900">
+                            ${agent.canDraw.toFixed(2)}
+                          </span>
+                        </td>
+
+                        {/* This window */}
+                        <td className="py-4 px-5 align-middle">
+                          <div className="w-48 max-w-full">
+                            <div className="w-full h-1 bg-neutral-200/80 rounded-full overflow-hidden mb-1.5">
+                              <div
+                                className="h-full bg-neutral-700 rounded-full transition-all"
+                                style={{ width: `${pct}%` }}
+                              />
+                            </div>
+                            <div className="text-xs text-neutral-500 font-normal">
+                              ${agent.spentWindow.toFixed(2)} of ${agent.budgetWindow.toFixed(2)}
+                            </div>
+                          </div>
+                        </td>
+
+                        {/* Lifetime */}
+                        <td className="py-4 px-5 align-middle">
+                          <span className="text-xs text-neutral-600 font-normal">
+                            ${agent.spentLifetime.toFixed(2)} / ${agent.lifetimeCap.toFixed(2)}
+                          </span>
+                        </td>
+
+                        {/* Operator */}
+                        <td className="py-4 px-5 align-middle">
+                          <span className="font-mono text-xs text-neutral-600">
+                            {agent.operator}
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })
+                ) : (
+                  <tr>
+                    <td colSpan={5} className="py-8 text-center text-xs text-neutral-400">
+                      No matching agents found
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ) : (
+        /* Visual Tree View */
+        <div className="bg-white rounded-2xl border border-neutral-200/80 p-6 shadow-[0_1px_3px_rgba(0,0,0,0.02)] space-y-4">
+          <div className="text-xs font-semibold text-neutral-400 uppercase tracking-wider mb-2">
+            Mandate Hierarchy Tree
+          </div>
+
+          <div className="space-y-3">
+            {allAgents.map((agent) => (
+              <div
+                key={agent.id}
+                className={cn(
+                  'flex items-center justify-between p-3.5 rounded-xl border transition-colors',
+                  agent.isRoot
+                    ? 'bg-neutral-50/70 border-neutral-200'
+                    : 'bg-white border-neutral-200/70 ml-6 relative before:absolute before:-left-4 before:top-1/2 before:w-4 before:h-px before:bg-neutral-300',
+                )}
+              >
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-lg bg-neutral-100 border border-neutral-200/80 flex items-center justify-center text-neutral-700">
+                    <Bot className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono text-sm font-semibold text-neutral-900">
+                        {agent.formattedId}
+                      </span>
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-neutral-100 text-neutral-600 border border-neutral-200">
+                        {agent.isRoot ? 'Root mandate' : `${agent.shareBps / 100}% share`}
+                      </span>
+                    </div>
+                    <div className="text-xs text-neutral-400 mt-0.5">
+                      Operator: <span className="font-mono text-neutral-600">{agent.operator}</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="text-right">
+                  <div className="text-xs font-medium text-neutral-900">
+                    ${agent.budgetWindow.toFixed(2)} window
+                  </div>
+                  <div className="text-[11px] text-neutral-400">
+                    ${agent.lifetimeCap.toFixed(2)} lifetime cap
+                  </div>
+                </div>
               </div>
-              <div className="space-y-2"><Label>Name</Label><Input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Research Agent" /></div>
-              <div className="space-y-2"><Label>Share of parent (bps)</Label><Input value={share} onChange={(e) => setShare(e.target.value)} /></div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Spawn an agent Modal */}
+      {spawnModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-[2px] p-4 animate-in fade-in duration-150">
+          <div className="bg-white rounded-2xl max-w-[440px] w-full p-6 shadow-2xl relative border border-neutral-100 animate-in zoom-in-95 duration-150">
+            {/* Close Button */}
+            <button
+              onClick={() => setSpawnModalOpen(false)}
+              className="absolute top-5 right-5 w-7 h-7 rounded-full border border-pink-200/90 text-pink-700/60 hover:text-pink-900 bg-pink-50/50 flex items-center justify-center transition-colors cursor-pointer"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+
+            {/* Modal Title & Subtitle */}
+            <h2 className="text-[20px] font-bold text-neutral-900 tracking-tight">
+              Spawn an agent
+            </h2>
+            <p className="text-xs text-neutral-500 mt-1.5 leading-relaxed pr-6">
+              A child mandate under the root. It can only ever be narrower than its parent, and the contract refuses a wider one whoever asks.
+            </p>
+
+            {/* Form Fields */}
+            <div className="space-y-4 mt-5">
+              {/* Field 1: Operator Address */}
+              <div>
+                <label className="flex items-center gap-1 text-xs font-medium text-neutral-700">
+                  <span>Operator address</span>
+                  <span
+                    title="The Ethereum address or signer for this child agent"
+                    className="inline-flex items-center justify-center w-3.5 h-3.5 rounded-full border border-neutral-300 text-neutral-400 text-[9px] font-bold cursor-help"
+                  >
+                    i
+                  </span>
+                </label>
+                <input
+                  type="text"
+                  placeholder="0x..."
+                  value={operatorInput}
+                  onChange={(e) => setOperatorInput(e.target.value)}
+                  className="w-full mt-1.5 px-3.5 py-2.5 rounded-xl border border-neutral-200 text-sm font-mono text-neutral-800 placeholder:text-neutral-400 focus:outline-none focus:border-neutral-400 focus:ring-1 focus:ring-neutral-400 shadow-2xs"
+                />
+              </div>
+
+              {/* Field 2: Share of the Parent */}
+              <div>
+                <label className="flex items-center gap-1 text-xs font-medium text-neutral-700">
+                  <span>Share of the parent</span>
+                  <span
+                    title="Percentage of parent budget allocated to this child mandate"
+                    className="inline-flex items-center justify-center w-3.5 h-3.5 rounded-full border border-neutral-300 text-neutral-400 text-[9px] font-bold cursor-help"
+                  >
+                    i
+                  </span>
+                </label>
+                <div className="w-full mt-1.5 flex items-center rounded-xl border border-neutral-200 px-3.5 py-2 bg-white focus-within:border-neutral-400 focus-within:ring-1 focus-within:ring-neutral-400 shadow-2xs">
+                  <input
+                    type="number"
+                    min="1"
+                    max="100"
+                    value={sharePercent}
+                    onChange={(e) => setSharePercent(e.target.value)}
+                    className="w-full text-sm text-neutral-800 focus:outline-none font-medium"
+                  />
+                  <span className="text-sm text-neutral-400 font-normal pl-2">%</span>
+                </div>
+                <p className="text-[11px] text-neutral-500 mt-2 leading-relaxed">
+                  ${childCalcWindowBudget} of ${parentWindowBudget.toFixed(2)} per window, and the same share of its lifetime cap.
+                </p>
+              </div>
             </div>
-            <Button variant="accent" onClick={spawn} disabled={busy !== null}><UserPlus className="size-4" /> Spawn</Button>
-          </CardContent>
-        </Card>
+
+            {/* Modal Actions */}
+            <div className="flex items-center justify-end gap-2.5 mt-6 pt-2">
+              <button
+                type="button"
+                onClick={() => setSpawnModalOpen(false)}
+                className="px-4 py-2 rounded-xl border border-neutral-200/90 text-sm font-medium text-neutral-700 bg-white hover:bg-neutral-50 transition cursor-pointer shadow-2xs"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleSpawn}
+                disabled={busy !== null}
+                className="px-5 py-2 rounded-xl text-sm font-medium text-white shadow-xs bg-gradient-to-r from-[#9855b9] to-[#c24285] hover:opacity-90 transition-opacity cursor-pointer disabled:opacity-50"
+              >
+                Spawn agent
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

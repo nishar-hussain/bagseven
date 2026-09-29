@@ -72,10 +72,10 @@ export function Header({ activeSection, onSectionChange }: HeaderProps) {
                   key={item.id}
                   onClick={() => onSectionChange(item.id)}
                   className={cn(
-                    'transition-colors font-normal cursor-pointer',
+                    'transition-all cursor-pointer text-[13px]',
                     isActive
-                      ? 'text-neutral-900 font-semibold'
-                      : 'text-neutral-500 hover:text-neutral-900',
+                      ? 'text-neutral-900 font-medium border border-neutral-300/90 rounded-full px-3 py-0.5 shadow-2xs bg-white'
+                      : 'text-neutral-500 hover:text-neutral-900 px-1 py-0.5 font-normal',
                   )}
                 >
                   {item.label}
