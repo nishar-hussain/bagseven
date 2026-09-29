@@ -5,9 +5,9 @@ import { ConsoleClient } from '../lib/client';
 import { EMPTY_SESSION, type Session, type Toast } from '../lib/types';
 
 import { Header } from '../components/dashboard/header';
-import { MandateSection, AgentsSection, VaultSection, RefusalsSection, ResolveSection, MarketplaceSection } from '../components/dashboard/sections';
+import { MandateSection, AgentsSection, RefusalsSection, ResolveSection, MarketplaceSection } from '../components/dashboard/sections';
 
-export type Section = 'mandate' | 'agents' | 'vault' | 'refusals' | 'resolve' | 'marketplace';
+export type Section = 'mandate' | 'agents' | 'refusals' | 'resolve' | 'marketplace';
 
 let toastId = 0;
 const UI_KEY = 'agentos-console';
@@ -96,7 +96,6 @@ export default function Page() {
         <div key={activeSection} className="animate-in fade-in duration-200">
           {activeSection === 'mandate' && <MandateSection {...sectionProps} />}
           {activeSection === 'agents' && <AgentsSection {...sectionProps} />}
-          {activeSection === 'vault' && <VaultSection {...sectionProps} />}
           {activeSection === 'refusals' && <RefusalsSection {...sectionProps} />}
           {activeSection === 'resolve' && <ResolveSection {...sectionProps} />}
           {activeSection === 'marketplace' && <MarketplaceSection {...sectionProps} />}
