@@ -5,9 +5,9 @@ import { ConsoleClient } from '../lib/client';
 import { EMPTY_SESSION, type Session, type Toast } from '../lib/types';
 
 import { Header } from '../components/dashboard/header';
-import { MarketplaceSection } from '../components/dashboard/sections';
+import { MandateSection, AgentsSection, VaultSection, RefusalsSection, ResolveSection, MarketplaceSection } from '../components/dashboard/sections';
 
-export type Section = 'marketplace';
+export type Section = 'mandate' | 'agents' | 'vault' | 'refusals' | 'resolve' | 'marketplace';
 
 let toastId = 0;
 const UI_KEY = 'agentos-console';
@@ -18,7 +18,7 @@ export default function Page() {
   const client = useMemo(() => new ConsoleClient(gateway), [gateway]);
 
   const [session, setSession] = useState<Session>(EMPTY_SESSION);
-  const [activeSection, setActiveSection] = useState<Section>('marketplace');
+  const [activeSection, setActiveSection] = useState<Section>('mandate');
 
   const [busy, setBusy] = useState<string | null>(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
@@ -94,7 +94,12 @@ export default function Page() {
       <Header activeSection={activeSection} onSectionChange={setActiveSection} gateway={gateway} agentStatus={session.agentStatus} />
       <main className="flex-1 max-w-[1240px] w-full mx-auto px-6 sm:px-8 py-7">
         <div key={activeSection} className="animate-in fade-in duration-200">
-          <MarketplaceSection {...sectionProps} />
+          {activeSection === 'mandate' && <MandateSection {...sectionProps} />}
+          {activeSection === 'agents' && <AgentsSection {...sectionProps} />}
+          {activeSection === 'vault' && <VaultSection {...sectionProps} />}
+          {activeSection === 'refusals' && <RefusalsSection {...sectionProps} />}
+          {activeSection === 'resolve' && <ResolveSection {...sectionProps} />}
+          {activeSection === 'marketplace' && <MarketplaceSection {...sectionProps} />}
         </div>
       </main>
 

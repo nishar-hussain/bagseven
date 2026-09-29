@@ -10,7 +10,14 @@ interface HeaderProps {
   agentStatus?: string;
 }
 
-const nav: { id: Section; label: string }[] = [{ id: 'marketplace', label: 'Tool Market' }];
+const nav: { id: Section; label: string }[] = [
+  { id: 'mandate', label: 'Mandate' },
+  { id: 'agents', label: 'Agents' },
+  { id: 'vault', label: 'Vault' },
+  { id: 'refusals', label: 'Refusals' },
+  { id: 'resolve', label: 'Resolve' },
+  { id: 'marketplace', label: 'Tool Market' },
+];
 
 export function Header({ activeSection, onSectionChange }: HeaderProps) {
   return (
