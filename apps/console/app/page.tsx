@@ -87,29 +87,26 @@ export default function Page() {
     [toast],
   );
 
-  const sectionProps = { session, client, busy, persist, run, toast };
+  const sectionProps = { session, client, busy, persist, run, toast, onNavigate: setActiveSection };
 
   return (
-    <div className="flex min-h-screen bg-background">
-      <Sidebar activeSection={activeSection} onSectionChange={setActiveSection} collapsed={sidebarCollapsed} onCollapsedChange={setSidebarCollapsed} />
-      <div className={`flex-1 flex flex-col transition-all duration-300 ease-out ${sidebarCollapsed ? 'ml-[72px]' : 'ml-[260px]'}`}>
-        <Header activeSection={activeSection} gateway={gateway} agentStatus={session.agentStatus} />
-        <main className="flex-1 p-6 overflow-auto">
-          <div key={activeSection} className="animate-in fade-in slide-in-from-bottom-4 duration-500">
-            {activeSection === 'overview' && <OverviewSection {...sectionProps} />}
-            {activeSection === 'identity' && <IdentitySection {...sectionProps} />}
-            {activeSection === 'mandate' && <MandateSection {...sectionProps} />}
-            {activeSection === 'agents' && <AgentsSection {...sectionProps} />}
-            {activeSection === 'vault' && <VaultSection {...sectionProps} />}
-            {activeSection === 'refusals' && <RefusalsSection {...sectionProps} />}
-            {activeSection === 'resolve' && <ResolveSection {...sectionProps} />}
-            {activeSection === 'settle' && <SettleSection {...sectionProps} />}
-            {activeSection === 'marketplace' && <MarketplaceSection {...sectionProps} />}
-            {activeSection === 'activity' && <ActivitySection {...sectionProps} />}
-            {activeSection === 'settings' && <SettingsSection {...sectionProps} />}
-          </div>
-        </main>
-      </div>
+    <div className="min-h-screen bg-[#f5f6f8] text-[#111827] flex flex-col">
+      <Header activeSection={activeSection} onSectionChange={setActiveSection} gateway={gateway} agentStatus={session.agentStatus} />
+      <main className="flex-1 max-w-[1240px] w-full mx-auto px-6 sm:px-8 py-7">
+        <div key={activeSection} className="animate-in fade-in duration-200">
+          {activeSection === 'overview' && <OverviewSection {...sectionProps} />}
+          {activeSection === 'identity' && <IdentitySection {...sectionProps} />}
+          {activeSection === 'mandate' && <MandateSection {...sectionProps} />}
+          {activeSection === 'agents' && <AgentsSection {...sectionProps} />}
+          {activeSection === 'vault' && <VaultSection {...sectionProps} />}
+          {activeSection === 'refusals' && <RefusalsSection {...sectionProps} />}
+          {activeSection === 'resolve' && <ResolveSection {...sectionProps} />}
+          {activeSection === 'settle' && <SettleSection {...sectionProps} />}
+          {activeSection === 'marketplace' && <MarketplaceSection {...sectionProps} />}
+          {activeSection === 'activity' && <ActivitySection {...sectionProps} />}
+          {activeSection === 'settings' && <SettingsSection {...sectionProps} />}
+        </div>
+      </main>
 
       {/* toasts */}
       <div className="fixed bottom-4 right-4 z-50 space-y-2">

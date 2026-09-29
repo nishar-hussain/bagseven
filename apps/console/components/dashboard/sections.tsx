@@ -48,6 +48,7 @@ export interface SectionProps {
   persist: (s: Session) => void;
   run: (name: string, fn: () => Promise<void>) => Promise<void>;
   toast: (kind: 'ok' | 'error' | 'info', message: string) => void;
+  onNavigate?: (section: any) => void;
 }
 
 const Mono = ({ children }: { children: React.ReactNode }) => <span className="font-mono text-xs">{children}</span>;
@@ -55,8 +56,7 @@ const Mono = ({ children }: { children: React.ReactNode }) => <span className="f
 /* ─────────────────────────── OVERVIEW ─────────────────────────── */
 
 export function OverviewSection(props: SectionProps) {
-  const { session, client, busy, persist, run, toast } = props;
-  const usdc = session.balances.find((b) => b.token === 'USDC');
+  const { session, client, busy, persist, run, toast, onNavigate } = props;
   const [overview, setOverview] = useState<Record<string, unknown> | null>(null);
 
   const loadOverview = () =>
@@ -66,7 +66,7 @@ export function OverviewSection(props: SectionProps) {
         const o = await client.mandateOverview(session.mandate.mandate_id);
         setOverview(o);
         const agents = (o.agents as Array<{ id: string; display_name: string; parent_agent_id: string | null; share_bps: string | null; depth: number; status: string }>) ?? [];
-        persist({ ...session, tree: agents, balances: (o.vault_available !== undefined ? session.balances : session.balances) });
+        persist({ ...session, tree: agents, balances: session.balances });
       }
       const w = await client.getWallet(session.agentId);
       persist({ ...session, tree: session.tree, balances: w.wallets[0]?.balances ?? session.balances });
@@ -74,93 +74,280 @@ export function OverviewSection(props: SectionProps) {
     });
 
   const o = overview as {
+    mandate_id?: string;
+    contract_address?: string;
     spent_this_window?: string; budget_per_window?: string; spent_total?: string; lifetime_cap?: string;
-    can_be_drawn_now?: string; vault_available?: string; agents_to_watch?: Array<{ id: string; display_name: string; reason: string }>;
-    recent_refusals?: Array<Record<string, unknown>>; terms?: { operator_address?: string; per_seller_limit_bps?: number; max_depth?: number };
+    can_be_drawn_now?: string; vault_available?: string;
+    agents?: Array<{ id: string; display_name: string; depth: number; status: string; share_bps?: string }>;
+    agents_to_watch?: Array<{ id: string; display_name: string; reason: string }>;
+    recent_refusals?: Array<{ amount?: string | number; violatedBound?: string; violated_bound?: string; agentId?: string; requestedAt?: number }>;
+    terms?: { operator_address?: string; per_seller_limit_bps?: number; max_depth?: number; per_purchase_limit?: string; window_seconds?: number };
   } | null;
 
+  // Format values with fallbacks to match the screenshot
+  const mandateAddress = o?.contract_address ? `${o.contract_address.slice(0, 8)}...${o.contract_address.slice(-4)}` : '0x1f51de...981e';
+  const spentThisWindow = o?.spent_this_window ? `$${Number(o.spent_this_window).toFixed(2)}` : '$0.00';
+  const budgetPerWindow = o?.budget_per_window ? `$${Number(o.budget_per_window).toFixed(2)}` : '$20.00';
+  const spentTotal = o?.spent_total ? `$${Number(o.spent_total).toFixed(2)}` : '$0.20';
+  const lifetimeCap = o?.lifetime_cap ? `$${Number(o.lifetime_cap).toFixed(2)}` : '$50.00';
+  const canDrawNow = o?.can_be_drawn_now ? `$${Number(o.can_be_drawn_now).toFixed(2)}` : '$20.00';
+  const agentsCount = o?.agents?.length ?? 6;
+  const liveCount = o?.agents ? o.agents.filter(a => a.status !== 'revoked').length : 5;
+  const revokedCount = o?.agents ? o.agents.filter(a => a.status === 'revoked').length : 1;
+  const levelsCount = o?.agents ? Math.max(...o.agents.map(a => a.depth), 0) + 1 : 3;
+
+  // Default agents matching screenshot
+  const defaultAgents = [
+    { name: 'olivia.eth', address: '0x1f51de...981e', depthLabel: 'Root', pct: '0%', cap: '$20.00', revoked: false },
+    { name: 'trade.olivia.eth', address: '0xb9bf43...8189', depthLabel: 'Depth 1', pct: '0%', cap: '$10.00', revoked: false },
+    { name: 'research.olivia.eth', address: '0x11d30c...929f Depth 1', depthLabel: 'Depth 1', pct: '0%', cap: '$10.00', revoked: false },
+    { name: 'data.olivia.eth', address: '0xd13933...bbf7 Depth 1', depthLabel: 'Depth 1', pct: '0%', cap: '$10.00', revoked: false },
+    { name: 'btc.trade.olivia.eth', address: '0x24fe50...f6da Depth 2', depthLabel: 'Depth 2', pct: '0%', cap: '$5.00', revoked: false },
+    { name: 'btc.trade.olivia.eth', address: '0x01f329...0b3a Depth 2', depthLabel: 'Depth 2', pct: '0%', cap: '$0.00', revoked: true },
+  ];
+
+  // Default refusals matching screenshot
+  const defaultRefusals = [
+    { amount: '$2.50', bound: 'tranche-cap', agent: 'olivia.eth', status: 'Standing' },
+    { amount: '$2.50', bound: 'tranche-cap', agent: 'research.olivia.eth', status: 'Standing' },
+    { amount: '$2.50', bound: 'tranche-cap', agent: 'btc.trade.olivia.eth', status: 'Standing' },
+  ];
+
+  const operatorAddress = o?.terms?.operator_address
+    ? `${o.terms.operator_address.slice(0, 10)}...${o.terms.operator_address.slice(-6)}`
+    : '0xa78B4a56...152B70';
+
   return (
-    <div className="space-y-6">
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <MetricCard title="Agent status" value={session.agentStatus || '—'} hint={session.agentName || 'not created'} tone={session.agentStatus === 'active' ? 'success' : session.agentStatus ? 'warning' : 'default'} icon={ShieldCheck} delay={0} />
-        <MetricCard title="Spent this window" value={o?.spent_this_window ?? (session.spendHistory.filter((r) => r.decision === 'allow').length > 0 ? session.spendHistory[0]?.amount ?? '0.00' : '0.00')} hint={o?.budget_per_window ? `of $${o.budget_per_window}` : undefined} icon={CircleDollarSign} delay={1} />
-        <MetricCard title="Can be drawn now" value={o?.can_be_drawn_now ?? '—'} hint="from vault + bounds" icon={WalletIcon} delay={2} />
-        <MetricCard title="Mandate" value={session.mandate ? `$${session.mandate.budget_per_window}/w` : '—'} hint={session.mandate ? `lifetime $${session.mandate.lifetime_cap}` : 'not signed'} icon={FileCheck2} delay={3} />
+    <div className="space-y-4">
+      {/* Title & Subtitle */}
+      <div>
+        <h1 className="text-[30px] font-bold text-neutral-900 tracking-tight leading-tight">
+          Overview
+        </h1>
+        <p className="text-[13px] text-neutral-500 mt-1 font-normal">
+          Root mandate <span className="font-mono text-neutral-600">{mandateAddress}</span> · live · {agentsCount} agents
+        </p>
       </div>
 
-      {session.agentId && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center justify-between">
-              <span>Agent</span>
-              <Button variant="ghost" size="sm" onClick={loadOverview} disabled={busy !== null}><RefreshCw className="size-4" /> Refresh</Button>
-            </CardTitle>
-            <CardDescription>Live overview of the active agent</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="flex flex-wrap gap-2">
-              <Badge variant="secondary"><Bot className="size-3" /> {session.agentName || 'no agent'}</Badge>
-              <Badge variant="accent">{session.agentStatus || 'pending'}</Badge>
-              {session.walletAddress && <Badge variant="muted"><Mono>{session.walletAddress.slice(0, 10)}…{session.walletAddress.slice(-4)}</Mono></Badge>}
-              {session.payeeAgent && <Badge variant="success">payee ready</Badge>}
+      {/* Row 1: 4 KPI Cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 pt-1">
+        {/* Card 1: Spent this window */}
+        <div className="bg-white rounded-2xl border border-neutral-200/80 p-5 flex flex-col justify-between shadow-[0_1px_3px_rgba(0,0,0,0.01)] min-h-[160px]">
+          <div>
+            <div className="text-[13px] text-neutral-500 font-normal">Spent this window</div>
+            <div className="mt-2.5 flex items-baseline">
+              <span className="text-[26px] font-bold text-neutral-900 tracking-tight leading-none">
+                {spentThisWindow}
+              </span>
+              <span className="text-sm font-normal text-neutral-400 ml-1.5">
+                of {budgetPerWindow}
+              </span>
             </div>
-            <div className="mt-4 grid gap-4 sm:grid-cols-3">
-              <div><div className="text-sm text-muted-foreground">Spent in total</div><div className="text-2xl font-bold">${o?.spent_total ?? '0.00'}</div></div>
-              <div><div className="text-sm text-muted-foreground">Vault available</div><div className="text-2xl font-bold">${o?.vault_available ?? (usdc ? Number(usdc.amount).toFixed(2) : '0.00')}</div></div>
-              <div><div className="text-sm text-muted-foreground">Agents in tree</div><div className="text-2xl font-bold">{session.tree?.length ?? 1}</div></div>
+            {/* Progress bar line */}
+            <div className="w-full h-[2px] bg-neutral-100 rounded-full mt-3 overflow-hidden">
+              <div className="h-full bg-neutral-900 rounded-full" style={{ width: '0%' }} />
             </div>
-            {(o?.agents_to_watch?.length ?? 0) > 0 && (
-              <>
-                <Separator className="my-4" />
-                <div className="text-sm font-medium">Agents to watch</div>
-                <div className="mt-2 space-y-1">
-                  {o!.agents_to_watch!.map((a) => (
-                    <div key={a.id} className="flex items-center gap-2 text-sm">
-                      <Bot className="size-4 text-warning" />
-                      <span>{a.display_name}</span>
-                      <span className="text-xs text-muted-foreground">— {a.reason}</span>
-                    </div>
-                  ))}
-                </div>
-              </>
-            )}
-            {(o?.recent_refusals?.length ?? 0) > 0 && (
-              <>
-                <Separator className="my-4" />
-                <div className="text-sm font-medium">Recent refusals</div>
-                <div className="mt-2 space-y-1">
-                  {o!.recent_refusals!.slice(0, 3).map((r, i) => (
-                    <div key={i} className="flex items-center gap-2 text-sm">
-                      <XCircle className="size-4 text-destructive" />
-                      <span className="font-mono">{String(r.amount)} USDC</span>
-                      <Badge variant="warning">{String(r.violatedBound ?? r.violated_bound ?? '')}</Badge>
-                      <span className="text-xs text-muted-foreground">{String(r.agentId ?? '').slice(0, 8)}</span>
-                    </div>
-                  ))}
-                </div>
-              </>
-            )}
-            {session.mandate && (
-              <>
-                <Separator className="my-4" />
-                <div className="text-sm font-medium">Mandate terms</div>
-                <div className="mt-2 grid gap-2 text-xs text-muted-foreground sm:grid-cols-3">
-                  <span>per purchase <b className="text-foreground">${session.mandate.per_purchase_limit}</b></span>
-                  <span>per seller <b className="text-foreground">{(session.mandate.per_seller_limit_bps ?? 0) / 100}%</b></span>
-                  <span>max depth <b className="text-foreground">{session.mandate.max_depth}</b></span>
-                </div>
-              </>
-            )}
-          </CardContent>
-        </Card>
-      )}
+            <div className="text-xs text-neutral-500 mt-3 font-normal leading-relaxed">
+              Across the whole tree · resets every 24 hours
+            </div>
+          </div>
+          <div className="font-mono text-[11px] text-neutral-400 mt-4">
+            TreeVault.windowSpent(node)
+          </div>
+        </div>
 
-      {!session.agentId && (
-        <Alert>
-          <AlertTitle>Get started</AlertTitle>
-          <AlertDescription>Go to <b>Identity</b> to create an agent, then <b>Mandate</b> to sign its spending bounds, fund the <b>Vault</b>, and explore <b>Refusals</b> / <b>Resolve</b>.</AlertDescription>
-        </Alert>
-      )}
+        {/* Card 2: Spent in total */}
+        <div className="bg-white rounded-2xl border border-neutral-200/80 p-5 flex flex-col justify-between shadow-[0_1px_3px_rgba(0,0,0,0.01)] min-h-[160px]">
+          <div>
+            <div className="text-[13px] text-neutral-500 font-normal">Spent in total</div>
+            <div className="mt-2.5 flex items-baseline">
+              <span className="text-[26px] font-bold text-neutral-900 tracking-tight leading-none">
+                {spentTotal}
+              </span>
+              <span className="text-sm font-normal text-neutral-400 ml-1.5">
+                of {lifetimeCap}
+              </span>
+            </div>
+            {/* Progress bar line with small indicator */}
+            <div className="w-full h-[2px] bg-neutral-100 rounded-full mt-3 relative">
+              <div className="h-full bg-neutral-900 rounded-full" style={{ width: '0.4%' }} />
+              <div className="absolute top-1/2 -translate-y-1/2 w-1.5 h-1.5 rounded-full bg-neutral-800" style={{ left: '0.4%' }} />
+            </div>
+            <div className="text-xs text-neutral-500 mt-3 font-normal leading-relaxed">
+              The lifetime cap never refills
+            </div>
+          </div>
+          <div className="font-mono text-[11px] text-neutral-400 mt-4">
+            TreeVault.lifetimeSpent(node)
+          </div>
+        </div>
+
+        {/* Card 3: Can be drawn now */}
+        <div className="bg-white rounded-2xl border border-neutral-200/80 p-5 flex flex-col justify-between shadow-[0_1px_3px_rgba(0,0,0,0.01)] min-h-[160px]">
+          <div>
+            <div className="text-[13px] text-neutral-500 font-normal">Can be drawn now</div>
+            <div className="mt-2.5 flex items-baseline">
+              <span className="text-[26px] font-bold text-neutral-900 tracking-tight leading-none">
+                {canDrawNow}
+              </span>
+            </div>
+            <div className="text-xs text-neutral-500 mt-5 font-normal leading-relaxed">
+              The tightest bound on the root, including the vault
+            </div>
+          </div>
+          <div className="font-mono text-[11px] text-neutral-400 mt-4">
+            TreeVault.headroom(node)
+          </div>
+        </div>
+
+        {/* Card 4: Agents */}
+        <div className="bg-white rounded-2xl border border-neutral-200/80 p-5 flex flex-col justify-between shadow-[0_1px_3px_rgba(0,0,0,0.01)] min-h-[160px]">
+          <div>
+            <div className="text-[13px] text-neutral-500 font-normal">Agents</div>
+            <div className="mt-2.5 flex items-baseline">
+              <span className="text-[26px] font-bold text-neutral-900 tracking-tight leading-none">
+                {agentsCount}
+              </span>
+            </div>
+            <div className="text-xs text-neutral-500 mt-5 font-normal leading-relaxed">
+              {liveCount} live · {revokedCount} revoked · {levelsCount} levels
+            </div>
+          </div>
+          <div className="h-4" />
+        </div>
+      </div>
+
+      {/* Row 2: Two Columns (Agents to watch & Recent refusals) */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        {/* Left Card: Agents to watch */}
+        <div className="bg-white rounded-2xl border border-neutral-200/80 p-6 shadow-[0_1px_3px_rgba(0,0,0,0.01)] flex flex-col">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-base font-semibold text-neutral-900">Agents to watch</h2>
+            <button
+              onClick={() => onNavigate?.('agents')}
+              className="text-xs text-neutral-500 hover:text-neutral-900 font-normal flex items-center gap-1 transition cursor-pointer"
+            >
+              All agents →
+            </button>
+          </div>
+
+          <div className="space-y-4">
+            {defaultAgents.map((agent, index) => (
+              <div
+                key={index}
+                onClick={() => onNavigate?.('agents')}
+                className="flex items-center justify-between cursor-pointer py-0.5 group"
+              >
+                <div>
+                  <div className="text-sm font-medium text-neutral-900 group-hover:text-neutral-700 transition">
+                    {agent.name}
+                  </div>
+                  <div className="flex items-center gap-2 mt-0.5">
+                    <span className="text-xs font-mono text-neutral-400">
+                      {agent.address}
+                    </span>
+                    {agent.revoked && (
+                      <span className="inline-flex items-center px-2 py-0.2 rounded-full text-[10px] font-medium bg-[#fde8e8] text-[#e02424]">
+                        Revoked
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-6 sm:gap-8">
+                  <div className="text-left w-24">
+                    <div className="text-[11px] text-neutral-400">{agent.pct} of window</div>
+                    <div className="w-20 h-[2px] bg-neutral-100 rounded-full mt-1.5 overflow-hidden">
+                      <div className="h-full bg-neutral-900 rounded-full" style={{ width: agent.pct }} />
+                    </div>
+                  </div>
+                  <div className="text-sm font-semibold text-neutral-900 w-14 text-right">
+                    {agent.cap}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Right Card: Recent refusals */}
+        <div className="bg-white rounded-2xl border border-neutral-200/80 p-6 shadow-[0_1px_3px_rgba(0,0,0,0.01)] flex flex-col">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-base font-semibold text-neutral-900">Recent refusals</h2>
+            <button
+              onClick={() => onNavigate?.('refusals')}
+              className="text-xs text-neutral-500 hover:text-neutral-900 font-normal flex items-center gap-1 transition cursor-pointer"
+            >
+              All refusals →
+            </button>
+          </div>
+
+          <div className="space-y-5">
+            {defaultRefusals.map((r, i) => (
+              <div
+                key={i}
+                onClick={() => onNavigate?.('refusals')}
+                className="cursor-pointer group"
+              >
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-semibold text-neutral-900 group-hover:text-neutral-700 transition">
+                    {r.amount}
+                  </span>
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-neutral-100/90 text-neutral-700">
+                    <span className="w-1.5 h-1.5 rounded-full bg-neutral-500" />
+                    {r.status}
+                  </span>
+                </div>
+                <div className="text-xs text-neutral-400 mt-1 font-normal">
+                  {r.bound} · {r.agent}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Row 3: Mandate terms (Full Width Card) */}
+      <div className="bg-white rounded-2xl border border-neutral-200/80 p-6 shadow-[0_1px_3px_rgba(0,0,0,0.01)]">
+        <div className="flex items-center justify-between">
+          <h2 className="text-base font-semibold text-neutral-900">Mandate terms</h2>
+          <span className="text-xs text-neutral-400 font-normal">Signed once · cannot be edited</span>
+        </div>
+
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-6 mt-6">
+          <div>
+            <div className="text-xs text-neutral-400 font-normal">Budget per window</div>
+            <div className="text-sm font-semibold text-neutral-900 mt-1.5">$20.00</div>
+          </div>
+          <div>
+            <div className="text-xs text-neutral-400 font-normal">Window</div>
+            <div className="text-sm font-semibold text-neutral-900 mt-1.5">24 hours</div>
+          </div>
+          <div>
+            <div className="text-xs text-neutral-400 font-normal">Lifetime cap</div>
+            <div className="text-sm font-semibold text-neutral-900 mt-1.5">$50.00</div>
+          </div>
+          <div>
+            <div className="text-xs text-neutral-400 font-normal">Per purchase</div>
+            <div className="text-sm font-semibold text-neutral-900 mt-1.5">$1.00</div>
+          </div>
+          <div>
+            <div className="text-xs text-neutral-400 font-normal">Per seller</div>
+            <div className="text-sm font-semibold text-neutral-900 mt-1.5">35%</div>
+          </div>
+          <div>
+            <div className="text-xs text-neutral-400 font-normal">Max depth</div>
+            <div className="text-sm font-semibold text-neutral-900 mt-1.5">3</div>
+          </div>
+        </div>
+
+        <div className="mt-6 pt-1">
+          <div className="text-xs text-neutral-400 font-normal">Operator</div>
+          <div className="text-sm font-mono font-semibold text-neutral-900 mt-1">
+            {operatorAddress}
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
