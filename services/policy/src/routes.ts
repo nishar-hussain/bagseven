@@ -8,6 +8,7 @@ import { newJti, signBytes, signSpendToken } from '@agentos/auth';
 import { emit } from '@agentos/events';
 import { ApiError, idempotencyOnSend, idempotencyPreHandler, type ServiceDeps } from '@agentos/server';
 import { applySpend, canonicalMandate, depthOfAgent, evaluate, reverseSpend, type MandateRow } from '@agentos/mandate';
+import { recoverMessageAddress } from 'viem';
 import { getPolicySigningKey } from './key.js';
 
 const TOKEN_TTL_SECONDS = 30;
@@ -22,6 +23,7 @@ const createMandateSchema = z.object({
   per_seller_limit_bps: z.number().int().min(0).max(10000),
   max_depth: z.number().int().min(0),
   operator_address: z.string().regex(/^0x[0-9a-fA-F]{40}$/).optional(),
+  signature: z.string().optional(),
   chain: z.string().default('sepolia'),
   created_by: z.string().default('console'),
 });
@@ -167,7 +169,22 @@ export function buildPolicyRoutes(app: FastifyInstance, { db, redis, config }: S
       chain: body.chain,
     });
     const { privateKeyPem } = getPolicySigningKey(config);
-    const signature = signBytes(Buffer.from(canonical, 'utf8'), privateKeyPem);
+
+    // The operator (the connected wallet) signs the canonical payload once via
+    // EIP-191 personal_sign. The recovered signer must be the operator address.
+    let signature: string;
+    if (body.signature) {
+      const recovered = await recoverMessageAddress({
+        message: canonical,
+        signature: body.signature as `0x${string}`,
+      });
+      if (recovered.toLowerCase() !== operatorAddress.toLowerCase()) {
+        throw new ApiError(403, 'SIGNATURE_MISMATCH', 'mandate signature was not produced by the operator address');
+      }
+      signature = body.signature;
+    } else {
+      signature = signBytes(Buffer.from(canonical, 'utf8'), privateKeyPem);
+    }
 
     let mandateId: string | undefined;
     await db.transaction(async (tx) => {

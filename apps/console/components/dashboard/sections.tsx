@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { ConsoleClient } from '../../lib/client';
 import { cn } from '../../lib/utils';
-import { connectWallet, ensureSepolia, hasWallet, sendNative, sendUsdc, shortAddress } from '../../lib/wallet';
+import { buildCanonicalMandate, connectWallet, ensureSepolia, hasWallet, sendNative, sendUsdc, shortAddress, signMessage } from '../../lib/wallet';
 import type { Session, SpendDecision } from '../../lib/types';
 import { Button } from '../ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/card';
@@ -571,21 +571,28 @@ export function MandateSection(props: SectionProps) {
   const sign = () =>
     run('sign mandate', async () => {
       if (!session.agentId) throw new Error('create an agent first');
-      const m = await client.createMandate({
+      // The connected wallet IS the operator + signer (EIP-191 personal_sign).
+      const operatorAddress = (session.userWallet ?? operatorAddr.trim()) || undefined;
+      if (!operatorAddress) throw new Error('connect your wallet first (top right) or paste an operator address');
+      const payload = {
         agent_id: session.agentId,
+        operator_address: operatorAddress,
         budget_per_window: budget,
         window_seconds: windowSeconds,
         lifetime_cap: lifetime,
         per_purchase_limit: perPurchase,
         per_seller_limit_bps: sellerBps,
         max_depth: Number(maxDepth),
-        operator_address: operatorAddr.trim() || undefined,
-      });
+        chain: 'sepolia',
+      };
+      const canonical = buildCanonicalMandate(payload);
+      const signature = session.userWallet ? await signMessage(canonical) : undefined;
+      const m = await client.createMandate({ ...payload, signature });
       persist({
         ...session,
-        mandate: { mandate_id: m.mandate_id, operator_address: operatorAddr.trim() || m.operator_address, budget_per_window: budget, window_seconds: windowSeconds, lifetime_cap: lifetime, per_purchase_limit: perPurchase, per_seller_limit_bps: sellerBps, max_depth: Number(maxDepth), signature: m.signature },
+        mandate: { mandate_id: m.mandate_id, operator_address: operatorAddress, budget_per_window: budget, window_seconds: windowSeconds, lifetime_cap: lifetime, per_purchase_limit: perPurchase, per_seller_limit_bps: sellerBps, max_depth: Number(maxDepth), signature: m.signature },
       });
-      toast('ok', 'Mandate signed — immutable');
+      toast('ok', `Mandate signed by ${session.userWallet ? 'your wallet' : 'operator'} — immutable`);
     });
 
   const connectOperator = () =>
@@ -597,6 +604,8 @@ export function MandateSection(props: SectionProps) {
       persist({ ...session, userWallet: address });
       toast('ok', `Operator wallet connected ${shortAddress(address)}`);
     });
+
+  const effectiveOperator = session.userWallet ?? operatorAddr.trim();
 
   const tryPurchase = () =>
     run('try a purchase', async () => {
@@ -800,9 +809,10 @@ export function MandateSection(props: SectionProps) {
               </label>
               <div className="flex items-center gap-2">
                 <input
-                  value={operatorAddr} onChange={(e) => setOperatorAddr(e.target.value)}
+                  value={effectiveOperator} onChange={(e) => { setOperatorAddr(e.target.value); }}
                   className="flex-1 border border-neutral-200 rounded-xl px-3 py-2 text-sm text-neutral-900 font-mono outline-none bg-white focus:ring-2 focus:ring-neutral-900/10"
                   placeholder="0x…"
+                  readOnly={!!session.userWallet}
                 />
                 <button
                   onClick={connectOperator}
@@ -813,7 +823,7 @@ export function MandateSection(props: SectionProps) {
                 </button>
               </div>
               {session.userWallet && (
-                <div className="mt-2 text-xs text-neutral-500 font-mono">{shortAddress(session.userWallet)}</div>
+                <div className="mt-2 text-xs text-neutral-500 font-mono">Operator = connected wallet {shortAddress(session.userWallet)}</div>
               )}
             </div>
           </div>
@@ -847,7 +857,7 @@ export function MandateSection(props: SectionProps) {
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-sm text-neutral-500">Operator</span>
-                <span className="text-sm font-semibold text-neutral-900">{operatorAddr ? `${operatorAddr.slice(0, 6)}…` : '–'}</span>
+                <span className="text-sm font-semibold text-neutral-900">{effectiveOperator ? `${effectiveOperator.slice(0, 6)}…` : '–'}</span>
               </div>
             </div>
 

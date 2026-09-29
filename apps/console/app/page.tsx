@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ConsoleClient } from '../lib/client';
 import { EMPTY_SESSION, type Session, type Toast } from '../lib/types';
+import { connectWallet, ensureSepolia, hasWallet } from '../lib/wallet';
 
 import { Header } from '../components/dashboard/header';
 import { MandateSection, AgentsSection, RefusalsSection, ResolveSection, MarketplaceSection } from '../components/dashboard/sections';
@@ -87,11 +88,24 @@ export default function Page() {
     [toast],
   );
 
+  const onConnectWallet = useCallback(async () => {
+    if (!hasWallet()) throw new Error('No browser wallet (MetaMask) detected.');
+    const address = await connectWallet();
+    await ensureSepolia();
+    setSession((s) => ({ ...s, userWallet: address }));
+    toast('ok', `Wallet connected`);
+  }, [toast]);
+
+  const onDisconnectWallet = useCallback(() => {
+    setSession((s) => ({ ...s, userWallet: undefined }));
+    toast('info', 'Wallet disconnected');
+  }, [toast]);
+
   const sectionProps = { session, client, busy, persist, run, toast };
 
   return (
     <div className="min-h-screen bg-[#f5f6f8] text-[#111827] flex flex-col">
-      <Header activeSection={activeSection} onSectionChange={setActiveSection} gateway={gateway} agentStatus={session.agentStatus} />
+      <Header activeSection={activeSection} onSectionChange={setActiveSection} gateway={gateway} agentStatus={session.agentStatus} userWallet={session.userWallet} onConnectWallet={onConnectWallet} onDisconnectWallet={onDisconnectWallet} />
       <main className="flex-1 max-w-[1240px] w-full mx-auto px-6 sm:px-8 py-7">
         <div key={activeSection} className="animate-in fade-in duration-200">
           {activeSection === 'mandate' && <MandateSection {...sectionProps} />}

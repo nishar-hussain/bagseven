@@ -102,3 +102,43 @@ export async function sendNative(from: string, to: string, amountEth: string): P
 export function shortAddress(a: string): string {
   return a ? `${a.slice(0, 6)}…${a.slice(-4)}` : '';
 }
+
+/**
+ * EIP-191 personal_sign. The connected wallet signs the canonical mandate
+ * payload — the mandate is bound to the signing wallet as its operator.
+ */
+export async function signMessage(message: string): Promise<string> {
+  const eth = window.ethereum;
+  if (!eth) throw new Error('No browser wallet found');
+  const signature = (await eth.request({
+    method: 'personal_sign',
+    params: [message, (await connectWallet())],
+  })) as string;
+  return signature;
+}
+
+/** Canonical mandate payload — must match @agentos/mandate.canonicalMandate. */
+export function buildCanonicalMandate(input: {
+  agent_id: string;
+  operator_address: string;
+  budget_per_window: string;
+  window_seconds: number;
+  lifetime_cap: string;
+  per_purchase_limit: string;
+  per_seller_limit_bps: number;
+  max_depth: number;
+  chain: string;
+}): string {
+  return [
+    'bagseven-mandate-v1',
+    input.agent_id,
+    input.operator_address,
+    input.budget_per_window,
+    input.window_seconds,
+    input.lifetime_cap,
+    input.per_purchase_limit,
+    input.per_seller_limit_bps,
+    input.max_depth,
+    input.chain,
+  ].join('|');
+}

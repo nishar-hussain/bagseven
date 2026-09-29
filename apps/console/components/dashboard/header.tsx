@@ -1,6 +1,8 @@
 'use client';
 
+import { useState } from 'react';
 import { cn } from '../../lib/utils';
+import { shortAddress } from '../../lib/wallet';
 import type { Section } from '../../app/page';
 
 interface HeaderProps {
@@ -8,6 +10,9 @@ interface HeaderProps {
   onSectionChange: (s: Section) => void;
   gateway?: string;
   agentStatus?: string;
+  userWallet?: string;
+  onConnectWallet?: () => Promise<void>;
+  onDisconnectWallet?: () => void;
 }
 
 const nav: { id: Section; label: string }[] = [
@@ -18,7 +23,12 @@ const nav: { id: Section; label: string }[] = [
   { id: 'marketplace', label: 'Tool Market' },
 ];
 
-export function Header({ activeSection, onSectionChange }: HeaderProps) {
+export function Header({ activeSection, onSectionChange, userWallet, onConnectWallet, onDisconnectWallet }: HeaderProps) {
+  const [busy, setBusy] = useState(false);
+  const connect = async () => {
+    setBusy(true);
+    try { await onConnectWallet?.(); } catch { /* toast handled upstream */ } finally { setBusy(false); }
+  };
   return (
     <header className="h-14 bg-white border-b border-neutral-200/80 sticky top-0 z-40 flex items-center justify-between px-6 sm:px-8">
       {/* Left: Brand + Nav */}
@@ -69,12 +79,30 @@ export function Header({ activeSection, onSectionChange }: HeaderProps) {
         </div>
       </div>
 
-      {/* Right: Network */}
+      {/* Right: Network + Connect Wallet */}
       <div className="flex items-center gap-3">
         <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-neutral-100/90 border border-neutral-200/80 text-xs font-medium text-neutral-700">
           <span className="w-1.5 h-1.5 rounded-full bg-neutral-400" />
           <span>Ethereum Sepolia</span>
         </div>
+
+        {userWallet ? (
+          <button
+            onClick={() => onDisconnectWallet?.()}
+            className="flex items-center gap-2 px-4 py-1.5 rounded-full text-xs font-medium border border-neutral-200/80 bg-white text-neutral-700 hover:bg-neutral-50 transition-colors cursor-pointer"
+          >
+            <span className="w-1.5 h-1.5 rounded-full bg-green-500" />
+            {shortAddress(userWallet)}
+          </button>
+        ) : (
+          <button
+            onClick={connect}
+            disabled={busy}
+            className="px-4 py-1.5 rounded-full text-xs font-medium text-white shadow-xs bg-gradient-to-r from-[#9855b9] to-[#c24285] hover:opacity-90 transition-opacity disabled:opacity-60 cursor-pointer"
+          >
+            {busy ? 'Connecting…' : 'Connect wallet'}
+          </button>
+        )}
       </div>
     </header>
   );
