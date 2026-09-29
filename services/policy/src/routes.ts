@@ -21,6 +21,7 @@ const createMandateSchema = z.object({
   per_purchase_limit: z.string().min(1),
   per_seller_limit_bps: z.number().int().min(0).max(10000),
   max_depth: z.number().int().min(0),
+  operator_address: z.string().regex(/^0x[0-9a-fA-F]{40}$/).optional(),
   chain: z.string().default('sepolia'),
   created_by: z.string().default('console'),
 });
@@ -153,7 +154,7 @@ export function buildPolicyRoutes(app: FastifyInstance, { db, redis, config }: S
     });
     if (!wallet) throw new ApiError(409, 'NO_WALLET', `agent has no wallet on ${body.chain} — provision one first`);
 
-    const operatorAddress = operatorAddressFor(body.agent_id);
+    const operatorAddress = body.operator_address ?? operatorAddressFor(body.agent_id);
     const canonical = canonicalMandate({
       agent_id: body.agent_id,
       operator_address: operatorAddress,

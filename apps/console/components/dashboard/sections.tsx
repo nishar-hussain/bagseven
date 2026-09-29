@@ -579,12 +579,23 @@ export function MandateSection(props: SectionProps) {
         per_purchase_limit: perPurchase,
         per_seller_limit_bps: sellerBps,
         max_depth: Number(maxDepth),
+        operator_address: operatorAddr.trim() || undefined,
       });
       persist({
         ...session,
-        mandate: { mandate_id: m.mandate_id, operator_address: m.operator_address, budget_per_window: budget, window_seconds: windowSeconds, lifetime_cap: lifetime, per_purchase_limit: perPurchase, per_seller_limit_bps: sellerBps, max_depth: Number(maxDepth), signature: m.signature },
+        mandate: { mandate_id: m.mandate_id, operator_address: operatorAddr.trim() || m.operator_address, budget_per_window: budget, window_seconds: windowSeconds, lifetime_cap: lifetime, per_purchase_limit: perPurchase, per_seller_limit_bps: sellerBps, max_depth: Number(maxDepth), signature: m.signature },
       });
       toast('ok', 'Mandate signed — immutable');
+    });
+
+  const connectOperator = () =>
+    run('connect operator wallet', async () => {
+      if (!hasWallet()) throw new Error('No browser wallet (MetaMask) detected.');
+      const address = await connectWallet();
+      await ensureSepolia();
+      setOperatorAddr(address);
+      persist({ ...session, userWallet: address });
+      toast('ok', `Operator wallet connected ${shortAddress(address)}`);
     });
 
   const tryPurchase = () =>
@@ -787,11 +798,23 @@ export function MandateSection(props: SectionProps) {
                 Operator address
                 <span className="ml-1 inline-flex items-center justify-center w-3.5 h-3.5 rounded-full border border-neutral-300 text-neutral-400 text-[9px] font-bold cursor-help" title="The operator's Ethereum address">i</span>
               </label>
-              <input
-                value={operatorAddr} onChange={(e) => setOperatorAddr(e.target.value)}
-                className="w-full border border-neutral-200 rounded-xl px-3 py-2 text-sm text-neutral-900 font-mono outline-none bg-white focus:ring-2 focus:ring-neutral-900/10"
-                placeholder="0x…"
-              />
+              <div className="flex items-center gap-2">
+                <input
+                  value={operatorAddr} onChange={(e) => setOperatorAddr(e.target.value)}
+                  className="flex-1 border border-neutral-200 rounded-xl px-3 py-2 text-sm text-neutral-900 font-mono outline-none bg-white focus:ring-2 focus:ring-neutral-900/10"
+                  placeholder="0x…"
+                />
+                <button
+                  onClick={connectOperator}
+                  disabled={busy !== null}
+                  className="px-3.5 py-2 rounded-xl text-xs font-medium text-white bg-gradient-to-r from-[#9855b9] to-[#c24285] hover:opacity-90 transition-opacity disabled:opacity-50 cursor-pointer whitespace-nowrap"
+                >
+                  {session.userWallet ? 'Connected' : 'Connect wallet'}
+                </button>
+              </div>
+              {session.userWallet && (
+                <div className="mt-2 text-xs text-neutral-500 font-mono">{shortAddress(session.userWallet)}</div>
+              )}
             </div>
           </div>
         </div>

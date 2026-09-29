@@ -117,6 +117,7 @@ export class ConsoleClient {
     per_purchase_limit: string;
     per_seller_limit_bps: number;
     max_depth: number;
+    operator_address?: string;
     chain?: string;
   }) {
     return this.request<{ mandate_id: string; agent_id: string; operator_address: string; signature: string; status: string }>('POST', '/v1/mandates', input);
