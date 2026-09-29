@@ -55,15 +55,16 @@ async function main(): Promise<void> {
 
   const wallet = await buyer.provisionWallet({ agent_id: agent.agent_id, chain: 'sepolia' });
   await buyer.creditWallet(wallet.wallet.id, { token: 'USDC', amount: CREDIT });
-  await buyer.createPolicy({
+  await buyer.createMandate({
     agent_id: agent.agent_id,
-    daily_budget: '50.00',
-    max_transaction: '20.00',
-    allowed_chains: ['sepolia'],
-    allowed_categories: ['trading', 'data-analysis'],
-    created_by: 'e2e-phase2',
+    budget_per_window: '50.00',
+    window_seconds: 86400,
+    lifetime_cap: '50.00',
+    per_purchase_limit: '5.00',
+    per_seller_limit_bps: 10000,
+    max_depth: 2,
   });
-  log('buyer agent funded + policy published', true);
+  log('buyer agent funded + mandate signed', true);
 
   // Provider onboarding (2.5).
   const provider = await consoleClient.registerProvider({
@@ -113,21 +114,21 @@ async function main(): Promise<void> {
   const receipts = await buyer.getAgentReceipts(agent.agent_id);
   log('receipt written for the tool call', receipts.receipts.length >= 1, receipts.receipts[0]?.id);
 
-  // Negative: a tool category the policy doesn't allow → denied (2.3).
+  // Negative: a tool priced above the mandate's per-purchase limit → refused.
   const deniedTool = await consoleClient.createTool(provider.provider_token, {
     provider_id: provider.provider_id,
-    name: 'gambling-odds',
-    category: 'gambling',
-    price: TOOL_PRICE,
+    name: 'over-limit-tool',
+    category: 'trading',
+    price: '10.00',
     endpoint_url: `${DEMO_URL}/v1/exec`,
   });
   let policyDenied = false;
   try {
-    await buyer.executeTool(agent.agent_id, deniedTool.tool.id, { game: 'sports' }, `phase2-denied-${Date.now()}`);
+    await buyer.executeTool(agent.agent_id, deniedTool.tool.id, { position: 'x' }, `phase2-denied-${Date.now()}`);
   } catch (err) {
     policyDenied = (err as { code?: string }).code === 'POLICY_DENIED';
   }
-  log('tool in a disallowed category → policy-denied (2.3)', policyDenied);
+  log('tool priced above per-purchase limit → refused (2.3)', policyDenied);
 
   // Negative: payTo-binding — a provider registered with a DIFFERENT payout than
   // its x402 challenge → the payment must be aborted before any signature (2.6).

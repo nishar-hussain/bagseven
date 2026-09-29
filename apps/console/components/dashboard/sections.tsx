@@ -3,8 +3,8 @@
 import { useEffect, useState } from 'react';
 import { ConsoleClient } from '../../lib/client';
 import { cn } from '../../lib/utils';
-import { connectWallet, ensureSepolia, hasWallet, sendNative, sendUsdc, shortAddress } from '../../lib/wallet';
-import type { Session } from '../../lib/types';
+import { shortAddress } from '../../lib/wallet';
+import type { Session, SpendDecision } from '../../lib/types';
 import { Button } from '../ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/card';
 import { Input } from '../ui/input';
@@ -20,7 +20,6 @@ import {
   ShieldCheck,
   Wallet as WalletIcon,
   FileCheck2,
-  Coins,
   Send,
   RefreshCw,
   Bot,
@@ -58,24 +57,35 @@ const Mono = ({ children }: { children: React.ReactNode }) => <span className="f
 export function OverviewSection(props: SectionProps) {
   const { session, client, busy, persist, run, toast } = props;
   const usdc = session.balances.find((b) => b.token === 'USDC');
-  const eth = session.balances.find((b) => b.token === 'ETH');
-  const spent = session.spendHistory.filter((r) => r.decision === 'allow').length;
+  const [overview, setOverview] = useState<Record<string, unknown> | null>(null);
 
-  const refresh = () =>
-    run('refresh', async () => {
+  const loadOverview = () =>
+    run('load mandate overview', async () => {
       if (!session.agentId) return;
+      if (session.mandate) {
+        const o = await client.mandateOverview(session.mandate.mandate_id);
+        setOverview(o);
+        const agents = (o.agents as Array<{ id: string; display_name: string; parent_agent_id: string | null; share_bps: string | null; depth: number; status: string }>) ?? [];
+        persist({ ...session, tree: agents, balances: (o.vault_available !== undefined ? session.balances : session.balances) });
+      }
       const w = await client.getWallet(session.agentId);
-      persist({ ...session, balances: w.wallets[0]?.balances ?? session.balances });
-      toast('ok', 'Refreshed balances');
+      persist({ ...session, tree: session.tree, balances: w.wallets[0]?.balances ?? session.balances });
+      toast('ok', 'Refreshed');
     });
+
+  const o = overview as {
+    spent_this_window?: string; budget_per_window?: string; spent_total?: string; lifetime_cap?: string;
+    can_be_drawn_now?: string; vault_available?: string; agents_to_watch?: Array<{ id: string; display_name: string; reason: string }>;
+    recent_refusals?: Array<Record<string, unknown>>; terms?: { operator_address?: string; per_seller_limit_bps?: number; max_depth?: number };
+  } | null;
 
   return (
     <div className="space-y-6">
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <MetricCard title="Agent status" value={session.agentStatus || '—'} hint={session.agentName || 'not created'} tone={session.agentStatus === 'active' ? 'success' : session.agentStatus ? 'warning' : 'default'} icon={ShieldCheck} delay={0} />
-        <MetricCard title="USDC balance" value={usdc ? Number(usdc.amount).toFixed(2) : '0.00'} hint={usdc ? `${Number(usdc.reservedAmount).toFixed(2)} reserved` : undefined} icon={CircleDollarSign} delay={1} />
-        <MetricCard title="ETH balance" value={eth ? Number(eth.amount).toFixed(4) : '0.00'} hint="gas" icon={WalletIcon} delay={2} />
-        <MetricCard title="Policy" value={session.policy ? `v${session.policy.version}` : '—'} hint={session.policy ? `max tx $${session.policy.max_transaction}` : 'not set'} icon={FileCheck2} delay={3} />
+        <MetricCard title="Spent this window" value={o?.spent_this_window ?? (session.spendHistory.filter((r) => r.decision === 'allow').length > 0 ? session.spendHistory[0]?.amount ?? '0.00' : '0.00')} hint={o?.budget_per_window ? `of $${o.budget_per_window}` : undefined} icon={CircleDollarSign} delay={1} />
+        <MetricCard title="Can be drawn now" value={o?.can_be_drawn_now ?? '—'} hint="from vault + bounds" icon={WalletIcon} delay={2} />
+        <MetricCard title="Mandate" value={session.mandate ? `$${session.mandate.budget_per_window}/w` : '—'} hint={session.mandate ? `lifetime $${session.mandate.lifetime_cap}` : 'not signed'} icon={FileCheck2} delay={3} />
       </div>
 
       {session.agentId && (
@@ -83,7 +93,7 @@ export function OverviewSection(props: SectionProps) {
           <CardHeader>
             <CardTitle className="flex items-center justify-between">
               <span>Agent</span>
-              <Button variant="ghost" size="sm" onClick={refresh} disabled={busy !== null}><RefreshCw className="size-4" /> Refresh</Button>
+              <Button variant="ghost" size="sm" onClick={loadOverview} disabled={busy !== null}><RefreshCw className="size-4" /> Refresh</Button>
             </CardTitle>
             <CardDescription>Live overview of the active agent</CardDescription>
           </CardHeader>
@@ -95,10 +105,52 @@ export function OverviewSection(props: SectionProps) {
               {session.payeeAgent && <Badge variant="success">payee ready</Badge>}
             </div>
             <div className="mt-4 grid gap-4 sm:grid-cols-3">
-              <div><div className="text-sm text-muted-foreground">Allow decisions</div><div className="text-2xl font-bold">{spent}</div></div>
-              <div><div className="text-sm text-muted-foreground">Tool executions</div><div className="text-2xl font-bold">{session.toolExecutions ?? 0}</div></div>
-              <div><div className="text-sm text-muted-foreground">Settlements</div><div className="text-2xl font-bold">{session.txHash ? '1 ✓' : '0'}</div></div>
+              <div><div className="text-sm text-muted-foreground">Spent in total</div><div className="text-2xl font-bold">${o?.spent_total ?? '0.00'}</div></div>
+              <div><div className="text-sm text-muted-foreground">Vault available</div><div className="text-2xl font-bold">${o?.vault_available ?? (usdc ? Number(usdc.amount).toFixed(2) : '0.00')}</div></div>
+              <div><div className="text-sm text-muted-foreground">Agents in tree</div><div className="text-2xl font-bold">{session.tree?.length ?? 1}</div></div>
             </div>
+            {(o?.agents_to_watch?.length ?? 0) > 0 && (
+              <>
+                <Separator className="my-4" />
+                <div className="text-sm font-medium">Agents to watch</div>
+                <div className="mt-2 space-y-1">
+                  {o!.agents_to_watch!.map((a) => (
+                    <div key={a.id} className="flex items-center gap-2 text-sm">
+                      <Bot className="size-4 text-warning" />
+                      <span>{a.display_name}</span>
+                      <span className="text-xs text-muted-foreground">— {a.reason}</span>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+            {(o?.recent_refusals?.length ?? 0) > 0 && (
+              <>
+                <Separator className="my-4" />
+                <div className="text-sm font-medium">Recent refusals</div>
+                <div className="mt-2 space-y-1">
+                  {o!.recent_refusals!.slice(0, 3).map((r, i) => (
+                    <div key={i} className="flex items-center gap-2 text-sm">
+                      <XCircle className="size-4 text-destructive" />
+                      <span className="font-mono">{String(r.amount)} USDC</span>
+                      <Badge variant="warning">{String(r.violatedBound ?? r.violated_bound ?? '')}</Badge>
+                      <span className="text-xs text-muted-foreground">{String(r.agentId ?? '').slice(0, 8)}</span>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+            {session.mandate && (
+              <>
+                <Separator className="my-4" />
+                <div className="text-sm font-medium">Mandate terms</div>
+                <div className="mt-2 grid gap-2 text-xs text-muted-foreground sm:grid-cols-3">
+                  <span>per purchase <b className="text-foreground">${session.mandate.per_purchase_limit}</b></span>
+                  <span>per seller <b className="text-foreground">{(session.mandate.per_seller_limit_bps ?? 0) / 100}%</b></span>
+                  <span>max depth <b className="text-foreground">{session.mandate.max_depth}</b></span>
+                </div>
+              </>
+            )}
           </CardContent>
         </Card>
       )}
@@ -106,7 +158,7 @@ export function OverviewSection(props: SectionProps) {
       {!session.agentId && (
         <Alert>
           <AlertTitle>Get started</AlertTitle>
-          <AlertDescription>Go to <b>Identity</b> to create an agent, then use the <b>Treasury</b> to fund the wallet, set policy, and propose spends.</AlertDescription>
+          <AlertDescription>Go to <b>Identity</b> to create an agent, then <b>Mandate</b> to sign its spending bounds, fund the <b>Vault</b>, and explore <b>Refusals</b> / <b>Resolve</b>.</AlertDescription>
         </Alert>
       )}
     </div>
@@ -199,73 +251,59 @@ export function IdentitySection(props: SectionProps) {
   );
 }
 
-/* ─────────────────────────── WALLET ─────────────────────────── */
+/* ─────────────────────────── VAULT ─────────────────────────── */
 
-export function WalletSection(props: SectionProps) {
+export function VaultSection(props: SectionProps) {
   const { session, client, busy, persist, run, toast } = props;
   const [fundAmount, setFundAmount] = useState(session.fundAmount ?? '10.00');
+  const [withdrawAmount, setWithdrawAmount] = useState('1.00');
   const setFundPersist = (v: string) => { setFundAmount(v); persist({ ...session, fundAmount: v }); };
 
-  const refresh = (s: Session) => client.getWallet(s.agentId).then((w) => ({ ...s, walletId: w.wallets[0]?.wallet.id, walletAddress: w.wallets[0]?.wallet.address, balances: w.wallets[0]?.balances ?? [] }));
+  const refresh = async (s: Session) => {
+    const w = await client.getWallet(s.agentId);
+    const wallet = w.wallets[0];
+    return { ...s, walletId: wallet?.wallet.id, walletAddress: wallet?.wallet.address, balances: wallet?.balances ?? [] };
+  };
 
   const provision = () =>
-    run('provision wallet', async () => {
-      await client.provisionWallet(session.agentId, 'sepolia');
-      persist(await refresh(session));
-      toast('ok', 'Wallet provisioned');
-    });
-
-  const connect = () =>
-    run('connect my wallet', async () => {
-      if (!hasWallet()) throw new Error('No browser wallet (MetaMask) detected — use the Dev faucet instead.');
-      const address = await connectWallet();
-      await ensureSepolia();
-      persist({ ...session, userWallet: address });
-      toast('ok', `Connected ${shortAddress(address)}`);
-    });
-
-  const fundFromWallet = () =>
-    run(`fund ${fundAmount} USDC from my wallet`, async () => {
-      if (!session.walletId) throw new Error('provision a wallet first');
-      if (!session.userWallet) throw new Error('connect your wallet first');
-      const gasEth = process.env.NEXT_PUBLIC_GAS_GRANT_ETH ?? '0.01';
-      const txHash = await sendUsdc(session.userWallet, session.walletAddress!, fundAmount);
-      try { await sendNative(session.userWallet, session.walletAddress!, gasEth); } catch { /* declined gas grant */ }
-      toast('info', 'Transactions sent — waiting for confirmation…');
-      let rec: { balances: Array<{ token: string; amount: string; reservedAmount: string }> } | null = null;
-      for (let i = 0; i < 30; i++) {
-        await new Promise((r) => setTimeout(r, 4000));
-        rec = await client.reconcileWallet(session.walletId);
-        const u = rec.balances.find((b) => b.token === 'USDC');
-        if (u && Number(u.amount) >= Number(fundAmount)) break;
-      }
-      persist(await refresh({ ...session, balances: rec?.balances ?? session.balances }));
-      const u = (rec?.balances ?? session.balances).find((b) => b.token === 'USDC');
-      if (u && Number(u.amount) >= Number(fundAmount)) toast('ok', `Sent ${fundAmount} USDC (+ ${gasEth} ETH gas) — tx ${txHash.slice(0, 12)}…`);
-      else toast('info', `Tx ${txHash.slice(0, 12)}… sent but not confirmed yet — reconcile again.`);
+    run('provision vault wallet', async () => {
+      const w = await client.provisionWallet(session.agentId, 'sepolia');
+      persist(await refresh({ ...session, walletId: w.wallet.id, walletAddress: w.wallet.address }));
+      toast('ok', 'Vault wallet provisioned');
     });
 
   const devFaucet = () =>
-    run(`fund USDC ${fundAmount}`, async () => {
+    run(`fund vault ${fundAmount} USDC`, async () => {
       if (!session.walletId) throw new Error('provision a wallet first');
       await client.creditWallet(session.walletId, 'USDC', fundAmount);
       persist(await refresh(session));
       toast('ok', `Credited ${fundAmount} USDC (dev faucet)`);
     });
 
+  const withdraw = () =>
+    run('withdraw from vault', async () => {
+      if (!session.agentId) throw new Error('create an agent first');
+      const resolved = await client.resolveAgent(session.agentId);
+      const vaultId = (resolved.vault as { id?: string })?.id;
+      if (!vaultId) throw new Error('no vault — sign a mandate first');
+      await client.withdrawVault(vaultId, { amount: withdrawAmount });
+      persist(await refresh(session));
+      toast('ok', `Withdrew ${withdrawAmount} USDC from the vault`);
+    });
+
   return (
     <div className="space-y-6">
       {!session.walletId ? (
         <Card>
-          <CardHeader><CardTitle>Wallet</CardTitle><CardDescription>Provision a treasury wallet on sepolia for the agent.</CardDescription></CardHeader>
-          <CardContent><Button onClick={provision} disabled={busy !== null}><Plus className="size-4" /> {busy ? 'Working…' : 'Provision wallet'}</Button></CardContent>
+          <CardHeader><CardTitle>Vault wallet</CardTitle><CardDescription>Provision the treasury wallet that the mandate's vault holds on Sepolia.</CardDescription></CardHeader>
+          <CardContent><Button onClick={provision} disabled={busy !== null}><Plus className="size-4" /> {busy ? 'Working…' : 'Provision vault wallet'}</Button></CardContent>
         </Card>
       ) : (
         <div className="grid gap-6 lg:grid-cols-2">
           <Card>
             <CardHeader>
-              <CardTitle className="flex items-center gap-2"><WalletIcon className="size-5 text-accent" /> Agent wallet</CardTitle>
-              <CardDescription>Where the agent holds funds</CardDescription>
+              <CardTitle className="flex items-center gap-2"><WalletIcon className="size-5 text-accent" /> Vault</CardTitle>
+              <CardDescription>Funds the agent tree draws from</CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
               <div className="space-y-2 text-sm">
@@ -289,28 +327,16 @@ export function WalletSection(props: SectionProps) {
 
           <Card>
             <CardHeader>
-              <CardTitle className="flex items-center gap-2"><CircleDollarSign className="size-5 text-accent" /> Fund</CardTitle>
-              <CardDescription>Credit from the dev faucet, or pay from your own wallet via a popup.</CardDescription>
+              <CardTitle className="flex items-center gap-2"><CircleDollarSign className="size-5 text-accent" /> Fund &amp; withdraw</CardTitle>
+              <CardDescription>Credit from the dev faucet, or withdraw available USDC (operator-only).</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="space-y-2"><Label>Fund amount (USDC)</Label><Input value={fundAmount} onChange={(e) => setFundPersist(e.target.value)} /></div>
-              <div className="flex flex-wrap gap-2">
-                <Button onClick={devFaucet} disabled={busy !== null}><Zap className="size-4" /> {busy ? 'Working…' : 'Dev faucet'}</Button>
-                {session.userWallet ? (
-                  <Button variant="accent" onClick={fundFromWallet} disabled={busy !== null}><Send className="size-4" /> Send {fundAmount} USDC from my wallet</Button>
-                ) : (
-                  <Button variant="outline" onClick={connect} disabled={busy !== null}><WalletIcon className="size-4" /> Connect my wallet</Button>
-                )}
-              </div>
-              {session.userWallet && (
-                <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <Badge variant="accent">connected</Badge><Mono>{shortAddress(session.userWallet)}</Mono>
-                </div>
-              )}
-              <Alert variant="warning">
-                <AlertTitle>Gas</AlertTitle>
-                <AlertDescription>Wallet funding also sends a small ETH gas grant so the agent can settle. The dev faucet does this automatically.</AlertDescription>
-              </Alert>
+              <Button onClick={devFaucet} disabled={busy !== null}><Zap className="size-4" /> {busy ? 'Working…' : 'Dev faucet'}</Button>
+              <Separator />
+              <div className="space-y-2"><Label>Withdraw amount (USDC)</Label><Input value={withdrawAmount} onChange={(e) => setWithdrawAmount(e.target.value)} /></div>
+              <Button variant="accent" onClick={withdraw} disabled={busy !== null}><Send className="size-4" /> Withdraw</Button>
+              <Alert variant="warning"><AlertTitle>Available ≠ reserved</AlertTitle><AlertDescription>Withdrawals only reduce the available balance — reserved funds stay locked for pending purchases.</AlertDescription></Alert>
             </CardContent>
           </Card>
         </div>
@@ -319,131 +345,203 @@ export function WalletSection(props: SectionProps) {
   );
 }
 
-/* ─────────────────────────── POLICY ─────────────────────────── */
+/* ─────────────────────────── MANDATE ─────────────────────────── */
 
-export function PolicySection(props: SectionProps) {
+export function MandateSection(props: SectionProps) {
   const { session, client, busy, persist, run, toast } = props;
-  const [daily, setDaily] = useState('50.00');
-  const [maxTx, setMaxTx] = useState('20.00');
-  const [threshold, setThreshold] = useState('15.00');
-  const [catBudget, setCatBudget] = useState('10.00');
+  const [budget, setBudget] = useState('20.00');
+  const [windowH, setWindowH] = useState('24');
+  const [lifetime, setLifetime] = useState('50.00');
+  const [perPurchase, setPerPurchase] = useState('5.00');
+  const [sellerBps, setSellerBps] = useState('1000');
+  const [maxDepth, setMaxDepth] = useState('3');
+  const [amount, setAmount] = useState(session.spendForm?.amount ?? '1.00');
+  const [counterparty, setCounterparty] = useState(session.payeeAgent?.id ?? '');
+  const [lastDecision, setLastDecision] = useState<SpendDecision | null>(null);
 
-  const create = () =>
-    run('publish policy', async () => {
-      const policy = await client.createPolicy({ agent_id: session.agentId, daily_budget: daily, max_transaction: maxTx, allowed_chains: ['sepolia'], allowed_categories: ['trading', 'data-purchase'], category_limits: { 'data-purchase': { daily_budget: catBudget, max_per_tx: '5.00' } }, human_approval_threshold: threshold, created_by: 'console' });
-      persist({ ...session, policy: { policy_id: policy.policy_id, version: policy.version, daily_budget: daily, max_transaction: maxTx, category_limits: { 'data-purchase': { daily_budget: catBudget, max_per_tx: '5.00' } }, human_approval_threshold: threshold } });
-      toast('ok', 'Policy published');
+  const sign = () =>
+    run('sign mandate', async () => {
+      if (!session.agentId) throw new Error('create an agent first');
+      const m = await client.createMandate({
+        agent_id: session.agentId,
+        budget_per_window: budget,
+        window_seconds: Number(windowH) * 3600,
+        lifetime_cap: lifetime,
+        per_purchase_limit: perPurchase,
+        per_seller_limit_bps: Number(sellerBps),
+        max_depth: Number(maxDepth),
+      });
+      persist({
+        ...session,
+        mandate: { mandate_id: m.mandate_id, operator_address: m.operator_address, budget_per_window: budget, window_seconds: Number(windowH) * 3600, lifetime_cap: lifetime, per_purchase_limit: perPurchase, per_seller_limit_bps: Number(sellerBps), max_depth: Number(maxDepth), signature: m.signature },
+      });
+      toast('ok', 'Mandate signed — immutable');
+    });
+
+  const tryPurchase = () =>
+    run('try a purchase', async () => {
+      if (!session.agentId) throw new Error('create an agent first');
+      const cp = counterparty || session.payeeAgent?.id || crypto.randomUUID();
+      const d = await client.spendIntent({ agent_id: session.agentId, amount, currency: 'USDC', category: 'general', chain: 'sepolia', counterparty_id: cp }, `try-${Date.now()}`);
+      setLastDecision(d);
+      const rec = { at: new Date().toISOString().slice(11, 19), amount, category: 'general', chain: 'sepolia', counterparty_id: cp, decision: d.decision, reason: d.reason, decision_id: d.decision_id, idemKey: `try-${Date.now()}` };
+      persist({ ...session, lastDecision: { ...rec, spend_token: d.spend_token }, spendHistory: [rec, ...session.spendHistory].slice(0, 25) });
+      toast(d.decision === 'allow' ? 'ok' : 'info', `${amount} USDC ${d.decision}${d.violated_bound ? ` — bound ${d.violated_bound}` : ''}`);
     });
 
   return (
     <div className="space-y-6">
-      {session.policy ? (
+      {!session.mandate ? (
         <Card>
-          <CardHeader><CardTitle className="flex items-center gap-2"><FileCheck2 className="size-5 text-accent" /> Active policy</CardTitle><CardDescription>Version {session.policy.version}</CardDescription></CardHeader>
-          <CardContent className="space-y-3">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2"><FileCheck2 className="size-5 text-accent" /> Sign a mandate</CardTitle>
+            <CardDescription>The operator signs the bounds once — they cannot be edited. No Allow/Deny; purchases are checked against these bounds only.</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
             <div className="grid gap-4 sm:grid-cols-3">
-              <div><div className="text-sm text-muted-foreground">Daily budget</div><div className="text-2xl font-bold">${session.policy.daily_budget}</div></div>
-              <div><div className="text-sm text-muted-foreground">Max per tx</div><div className="text-2xl font-bold">${session.policy.max_transaction}</div></div>
-              <div><div className="text-sm text-muted-foreground">Approval &gt;</div><div className="text-2xl font-bold">${session.policy.human_approval_threshold}</div></div>
+              <div className="space-y-2"><Label>Budget per window (USDC)</Label><Input value={budget} onChange={(e) => setBudget(e.target.value)} /></div>
+              <div className="space-y-2"><Label>Window (hours)</Label><Input value={windowH} onChange={(e) => setWindowH(e.target.value)} /></div>
+              <div className="space-y-2"><Label>Lifetime cap (USDC)</Label><Input value={lifetime} onChange={(e) => setLifetime(e.target.value)} /></div>
+              <div className="space-y-2"><Label>Per purchase (USDC)</Label><Input value={perPurchase} onChange={(e) => setPerPurchase(e.target.value)} /></div>
+              <div className="space-y-2"><Label>Per seller (bps, % of window)</Label><Input value={sellerBps} onChange={(e) => setSellerBps(e.target.value)} /></div>
+              <div className="space-y-2"><Label>Max depth</Label><Input value={maxDepth} onChange={(e) => setMaxDepth(e.target.value)} /></div>
             </div>
-            <Separator />
-            <div className="text-sm text-muted-foreground">Chains: sepolia · Categories: trading, data-purchase · data-purchase daily cap ${session.policy.category_limits?.['data-purchase']?.daily_budget}</div>
+            <Button onClick={sign} disabled={busy !== null || !session.agentId}><FileCheck2 className="size-4" /> {busy ? 'Working…' : 'Sign mandate'}</Button>
           </CardContent>
         </Card>
       ) : (
-        <Card>
-          <CardHeader><CardTitle>Publish policy</CardTitle><CardDescription>Deterministic spending rules evaluated on every intent.</CardDescription></CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid gap-4 sm:grid-cols-3">
-              <div className="space-y-2"><Label>Daily budget</Label><Input value={daily} onChange={(e) => setDaily(e.target.value)} /></div>
-              <div className="space-y-2"><Label>Max per transaction</Label><Input value={maxTx} onChange={(e) => setMaxTx(e.target.value)} /></div>
-              <div className="space-y-2"><Label>Human approval threshold</Label><Input value={threshold} onChange={(e) => setThreshold(e.target.value)} /></div>
-            </div>
-            <div className="space-y-2"><Label>data-purchase daily budget</Label><Input value={catBudget} onChange={(e) => setCatBudget(e.target.value)} /></div>
-            <Button onClick={create} disabled={busy !== null || !session.agentId}><FileCheck2 className="size-4" /> {busy ? 'Working…' : 'Publish policy'}</Button>
-          </CardContent>
-        </Card>
+        <>
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2"><FileCheck2 className="size-5 text-accent" /> Signed mandate</CardTitle>
+              <CardDescription>Fixed and immutable — a new mandate supersedes it.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="grid gap-4 sm:grid-cols-3">
+                <div><div className="text-sm text-muted-foreground">Budget / window</div><div className="text-2xl font-bold">${session.mandate.budget_per_window}</div></div>
+                <div><div className="text-sm text-muted-foreground">Lifetime cap</div><div className="text-2xl font-bold">${session.mandate.lifetime_cap}</div></div>
+                <div><div className="text-sm text-muted-foreground">Per purchase</div><div className="text-2xl font-bold">${session.mandate.per_purchase_limit}</div></div>
+              </div>
+              <div className="grid gap-2 text-sm">
+                <div className="flex justify-between"><span className="text-muted-foreground">window</span><Mono>{Math.round(session.mandate.window_seconds / 3600)} hours</Mono></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">per seller</span><Mono>{session.mandate.per_seller_limit_bps / 100}%</Mono></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">max depth</span><Mono>{session.mandate.max_depth}</Mono></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">operator</span><Mono>{session.mandate.operator_address?.slice(0, 18)}…</Mono></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">signed</span><Mono>{session.mandate.signature?.slice(0, 24)}…</Mono></div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2"><Zap className="size-5 text-accent" /> Try a purchase</CardTitle>
+              <CardDescription>Watch the bounds decide — within bounds it authorizes (spend_token); outside it refuses.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="space-y-2"><Label>Amount (USDC)</Label><Input value={amount} onChange={(e) => setAmount(e.target.value)} /></div>
+                <div className="space-y-2"><Label>Counterparty (seller)</Label><Input value={counterparty} onChange={(e) => setCounterparty(e.target.value)} placeholder={session.payeeAgent?.id ?? 'payee agent id'} /></div>
+              </div>
+              <Button variant="accent" onClick={tryPurchase} disabled={busy !== null}><Zap className="size-4" /> Run bounds check</Button>
+              {lastDecision && (
+                <div className="space-y-2 text-sm">
+                  <Separator />
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge variant={lastDecision.decision === 'allow' ? 'success' : lastDecision.decision === 'refused' ? 'destructive' : 'warning'}>{lastDecision.decision}</Badge>
+                    {lastDecision.violated_bound && <Badge variant="warning">bound: {lastDecision.violated_bound}</Badge>}
+                    {lastDecision.reason && <span className="text-muted-foreground">{lastDecision.reason}</span>}
+                  </div>
+                  {lastDecision.spend_token && <div className="flex justify-between"><span className="text-muted-foreground">spend_token</span><Mono>{lastDecision.spend_token.slice(0, 34)}…</Mono></div>}
+                  <div className="flex flex-wrap gap-4 text-xs text-muted-foreground">
+                    <span>window left <b className="text-foreground">{lastDecision.remaining_window ?? '—'}</b></span>
+                    <span>lifetime left <b className="text-foreground">{lastDecision.remaining_lifetime ?? '—'}</b></span>
+                    <span>can draw <b className="text-foreground">{lastDecision.can_draw ?? '—'}</b></span>
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </>
       )}
     </div>
   );
 }
 
-/* ─────────────────────────── SPEND ─────────────────────────── */
+/* ─────────────────────────── AGENTS ─────────────────────────── */
 
-export function SpendSection(props: SectionProps) {
+export function AgentsSection(props: SectionProps) {
   const { session, client, busy, persist, run, toast } = props;
-  const [amount, setAmount] = useState(session.spendForm?.amount ?? '3.00');
-  const [category, setCategory] = useState(session.spendForm?.category ?? 'data-purchase');
-  const [counterparty, setCounterparty] = useState(session.spendForm?.counterparty ?? session.payeeAgent?.id ?? crypto.randomUUID());
-  const pf = (a: string, cat: string, cp: string) => persist({ ...session, spendForm: { amount: a, category: cat, counterparty: cp } });
+  const [tree, setTree] = useState(session.tree ?? []);
+  const [parentId, setParentId] = useState(session.agentId);
+  const [name, setName] = useState('');
+  const [share, setShare] = useState('5000');
 
-  const propose = (amt: string, label: string, idemKey: string, cat = category) =>
-    run(`spend intent · ${label} (${amt} USDC)`, async () => {
-      const d = await client.spendIntent({ agent_id: session.agentId, amount: amt, currency: 'USDC', category: cat, chain: 'sepolia', counterparty_id: counterparty }, idemKey);
-      const rec = { at: new Date().toISOString().slice(11, 19), amount: amt, category: cat, chain: 'sepolia', counterparty_id: counterparty, decision: d.decision, reason: d.reason, decision_id: d.decision_id, idemKey, remaining: d.remaining_daily_budget };
-      persist({ ...session, lastDecision: { ...rec, spend_token: d.spend_token }, spendHistory: [rec, ...session.spendHistory].slice(0, 25) });
-      toast(d.decision === 'allow' ? 'ok' : 'info', `${amt} USDC ${d.decision}${d.reason ? ` — ${d.reason}` : ''}`);
+  const loadTree = () =>
+    run('load agent tree', async () => {
+      if (!session.mandate) throw new Error('sign a mandate first');
+      const overview = await client.mandateOverview(session.mandate.mandate_id);
+      const agents = (overview.agents as Array<{ id: string; display_name: string; parent_agent_id: string | null; share_bps: string | null; depth: number; status: string }>) ?? [];
+      setTree(agents);
+      persist({ ...session, tree: agents });
+    });
+
+  const spawn = () =>
+    run('spawn child agent', async () => {
+      if (!session.mandate) throw new Error('sign a mandate first');
+      if (!parentId) throw new Error('choose a parent agent');
+      if (!name.trim()) throw new Error('child name required');
+      const child = await client.spawnAgent(session.mandate.mandate_id, { parent_agent_id: parentId, display_name: name, share_bps: Number(share) });
+      toast('ok', `Spawned child at depth ${child.depth} (${Number(share) / 100}% share)`);
+      await loadTree();
     });
 
   return (
     <div className="space-y-6">
       <Card>
         <CardHeader>
-          <CardTitle className="flex items-center gap-2"><Coins className="size-5 text-accent" /> Spend intents</CardTitle>
-          <CardDescription>The hot path — policy returns allow + spend_token, deny with a reason, or pending_approval above the threshold.</CardDescription>
+          <CardTitle className="flex items-center gap-2"><Bot className="size-5 text-accent" /> Agent tree</CardTitle>
+          <CardDescription>Every purchase is charged to the agent and its ancestors. Child ≤ Parent — shares narrow, never widen.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="grid gap-4 sm:grid-cols-3">
-            <div className="space-y-2"><Label>Amount (USDC)</Label><Input value={amount} onChange={(e) => { setAmount(e.target.value); pf(e.target.value, category, counterparty); }} /></div>
-            <div className="space-y-2"><Label>Category</Label>
-              <Select value={category} onValueChange={(v) => { setCategory(v); pf(amount, v, counterparty); }}>
-                <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="data-purchase">data-purchase (cap $10)</SelectItem>
-                  <SelectItem value="trading">trading</SelectItem>
-                  <SelectItem value="gambling">gambling (not allowed)</SelectItem>
-                </SelectContent>
-              </Select>
+          <Button variant="outline" onClick={loadTree} disabled={busy !== null}><RefreshCw className="size-4" /> Load tree</Button>
+          {tree.length > 0 ? (
+            <div className="space-y-1.5">
+              {tree.map((a) => (
+                <div key={a.id} className="flex items-center gap-2 rounded-md border bg-muted/20 px-3 py-2 text-sm">
+                  <span className="font-mono text-muted-foreground">{'· '.repeat(a.depth)}</span>
+                  <Bot className="size-4 text-accent" />
+                  <span className="font-medium">{a.display_name}</span>
+                  <Badge variant="muted">depth {a.depth}</Badge>
+                  {a.share_bps && <Badge variant="outline">{Number(a.share_bps) / 100}% share</Badge>}
+                  <Badge variant={a.status === 'active' ? 'success' : 'warning'}>{a.status}</Badge>
+                  <span className="ml-auto font-mono text-xs text-muted-foreground">{a.id.slice(0, 8)}</span>
+                </div>
+              ))}
             </div>
-            <div className="space-y-2"><Label>Counterparty (uuid)</Label><Input value={counterparty} onChange={(e) => { setCounterparty(e.target.value); pf(amount, category, e.target.value); }} /></div>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <Button onClick={() => propose(amount, 'custom', `custom-${Date.now()}`)} disabled={busy !== null}><Zap className="size-4" /> Propose ${amount}</Button>
-            <Button variant="outline" onClick={() => propose('500.00', 'over-limit', `over-${Date.now()}`)} disabled={busy !== null}>Test $500 → deny</Button>
-            <Button variant="outline" onClick={() => propose('6.00', 'category cap', `cat-${Date.now()}`, 'data-purchase')} disabled={busy !== null}>Test $6 data → deny</Button>
-          </div>
+          ) : (
+            <p className="text-sm text-muted-foreground">No agents in the tree yet — sign a mandate, then spawn children.</p>
+          )}
         </CardContent>
       </Card>
 
-      {session.lastDecision && (
+      {session.mandate && (
         <Card>
-          <CardHeader><CardTitle>Last decision</CardTitle></CardHeader>
-          <CardContent className="space-y-2">
-            <div className="flex items-center gap-2">
-              <Badge variant={session.lastDecision.decision === 'allow' ? 'success' : session.lastDecision.decision === 'deny' ? 'destructive' : 'warning'}>{session.lastDecision.decision}</Badge>
-              {session.lastDecision.reason && <span className="text-sm text-muted-foreground">{session.lastDecision.reason}</span>}
+          <CardHeader><CardTitle className="flex items-center gap-2"><UserPlus className="size-5 text-accent" /> Spawn agent</CardTitle><CardDescription>Operator + share of the parent's mandate.</CardDescription></CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid gap-4 sm:grid-cols-3">
+              <div className="space-y-2">
+                <Label>Parent</Label>
+                <Select value={parentId} onValueChange={setParentId}>
+                  <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {tree.length > 0 ? tree.map((a) => <SelectItem key={a.id} value={a.id}>{'·'.repeat(a.depth)} {a.display_name}</SelectItem>) : <SelectItem value={session.agentId}>root (me)</SelectItem>}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2"><Label>Name</Label><Input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Research Agent" /></div>
+              <div className="space-y-2"><Label>Share of parent (bps)</Label><Input value={share} onChange={(e) => setShare(e.target.value)} /></div>
             </div>
-            <div className="grid gap-2 text-sm sm:grid-cols-2">
-              <div className="flex justify-between"><span className="text-muted-foreground">decision_id</span><Mono>{session.lastDecision.decision_id}</Mono></div>
-              <div className="flex justify-between"><span className="text-muted-foreground">remaining daily</span><Mono>{session.lastDecision.remaining ?? '—'}</Mono></div>
-              <div className="flex justify-between sm:col-span-2"><span className="text-muted-foreground">spend_token</span><Mono>{session.lastDecision.spend_token ? session.lastDecision.spend_token.slice(0, 32) + '…' : '—'}</Mono></div>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {session.spendHistory.length > 0 && (
-        <Card>
-          <CardHeader><CardTitle>Decision history</CardTitle></CardHeader>
-          <CardContent>
-            <Table>
-              <TableHeader><TableRow><TableHead>time</TableHead><TableHead>amount</TableHead><TableHead>category</TableHead><TableHead>decision</TableHead><TableHead>reason</TableHead></TableRow></TableHeader>
-              <TableBody>
-                {session.spendHistory.slice(0, 12).map((r, i) => (
-                  <TableRow key={`${r.at}-${i}`}><TableCell className="text-muted-foreground">{r.at}</TableCell><TableCell className="font-mono">{r.amount}</TableCell><TableCell>{r.category}</TableCell><TableCell><Badge variant={r.decision === 'allow' ? 'success' : r.decision === 'deny' ? 'destructive' : 'warning'}>{r.decision}</Badge></TableCell><TableCell className="text-muted-foreground">{r.reason ?? `remaining ${r.remaining}`}</TableCell></TableRow>
-                ))}
-              </TableBody>
-            </Table>
+            <Button variant="accent" onClick={spawn} disabled={busy !== null}><UserPlus className="size-4" /> Spawn</Button>
           </CardContent>
         </Card>
       )}
@@ -451,26 +549,128 @@ export function SpendSection(props: SectionProps) {
   );
 }
 
-/* ─────────────────────────── TREASURY (merged) ─────────────────────────── */
+/* ─────────────────────────── REFUSALS ─────────────────────────── */
 
-export function TreasurySection(props: SectionProps) {
+export function RefusalsSection(props: SectionProps) {
+  const { session, client, busy, run, toast } = props;
+  const [scope, setScope] = useState<'all' | 'standing' | 'released'>('all');
+  const [rows, setRows] = useState<Array<Record<string, unknown>>>([]);
+
+  const load = () =>
+    run('load refusals', async () => {
+      if (!session.agentId) throw new Error('create an agent first');
+      const res = await client.listRefusals(session.agentId, scope);
+      setRows(res.refusals);
+      toast('info', `${res.refusals.length} refusals`);
+    });
+
+  useEffect(() => {
+    if (!session.agentId) return;
+    client.listRefusals(session.agentId, scope).then((res) => setRows(res.refusals)).catch(() => undefined);
+  }, [session.agentId, scope]);
+
+  const badge = (bound: string) => (bound === 'window' || bound === 'vault' ? 'warning' : 'destructive') as 'warning' | 'destructive';
+
   return (
-    <Tabs defaultValue="wallet" className="gap-4">
-      <TabsList className="h-auto w-fit gap-1 p-1">
-        <TabsTrigger value="wallet">Wallet &amp; Funds</TabsTrigger>
-        <TabsTrigger value="policy">Policy</TabsTrigger>
-        <TabsTrigger value="spend">Spend Intents</TabsTrigger>
-      </TabsList>
-      <TabsContent value="wallet" className="mt-4">
-        <WalletSection {...props} />
-      </TabsContent>
-      <TabsContent value="policy" className="mt-4">
-        <PolicySection {...props} />
-      </TabsContent>
-      <TabsContent value="spend" className="mt-4">
-        <SpendSection {...props} />
-      </TabsContent>
-    </Tabs>
+    <div className="space-y-6">
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2"><XCircle className="size-5 text-accent" /> Refusals</CardTitle>
+          <CardDescription>Violations of a bound — never a configured "Deny". A refusal is standing while it would still fail, released once the bound no longer blocks it.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <Tabs value={scope} onValueChange={(v) => setScope(v as typeof scope)} className="gap-3">
+            <TabsList className="h-auto w-fit gap-1 p-1">
+              <TabsTrigger value="all">All</TabsTrigger>
+              <TabsTrigger value="standing">Standing</TabsTrigger>
+              <TabsTrigger value="released">Released</TabsTrigger>
+            </TabsList>
+            <TabsContent value={scope} className="mt-3">
+              {rows.length > 0 ? (
+                <Table>
+                  <TableHeader><TableRow><TableHead>time</TableHead><TableHead>amount</TableHead><TableHead>bound</TableHead><TableHead>agent</TableHead><TableHead>status</TableHead><TableHead>reason</TableHead></TableRow></TableHeader>
+                  <TableBody>
+                    {rows.slice(0, 20).map((r, i) => (
+                      <TableRow key={`${String(r.id)}-${i}`}>
+                        <TableCell className="text-muted-foreground">{String(r.requestedAt ?? r.createdAt ?? '').slice(11, 19)}</TableCell>
+                        <TableCell className="font-mono">{String(r.amount)} USDC</TableCell>
+                        <TableCell><Badge variant={badge(String(r.violatedBound ?? r.violated_bound ?? ''))}>{String(r.violatedBound ?? r.violated_bound ?? '')}</Badge></TableCell>
+                        <TableCell className="font-mono text-xs">{String(r.agentId ?? '').slice(0, 8)}</TableCell>
+                        <TableCell><Badge variant={r.status === 'released' ? 'success' : 'warning'}>{String(r.status)}</Badge></TableCell>
+                        <TableCell className="text-muted-foreground">{String(r.reason ?? '')}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              ) : (
+                <p className="text-sm text-muted-foreground">No refusals{scope === 'all' ? '' : ` in "${scope}"`} — every purchase stayed within bounds.</p>
+              )}
+            </TabsContent>
+          </Tabs>
+          <Button variant="outline" onClick={load} disabled={busy !== null}><RefreshCw className="size-4" /> Refresh</Button>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+/* ─────────────────────────── RESOLVE ─────────────────────────── */
+
+export function ResolveSection(props: SectionProps) {
+  const { client, busy, run, toast } = props;
+  const [ref, setRef] = useState('');
+  const [result, setResult] = useState<Record<string, unknown> | null>(null);
+
+  const resolve = () =>
+    run('resolve agent', async () => {
+      if (!ref.trim()) throw new Error('enter an agent id, address, or name');
+      const r = await client.resolveAgent(ref.trim());
+      setResult(r);
+      toast('ok', 'Resolved');
+    });
+
+  const mandate = result?.mandate as { id?: string; contract_address?: string | null; budget_per_window?: string; lifetime_cap?: string; per_purchase_limit?: string; per_seller_limit_bps?: number; max_depth?: number; operator_address?: string } | undefined;
+  const remaining = result?.remaining as { can_draw?: string; remaining_window?: string; remaining_lifetime?: string; vault_available?: string } | undefined;
+  const agent = result?.agent as { id?: string; display_name?: string; status?: string } | undefined;
+
+  return (
+    <div className="space-y-6">
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2"><Search className="size-5 text-accent" /> Resolve</CardTitle>
+          <CardDescription>Look up an agent by id, address, or name and read exactly what it may still spend.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex items-center gap-2">
+            <Input value={ref} onChange={(e) => setRef(e.target.value)} placeholder="agent id, 0x address, or name" className="font-mono text-xs" />
+            <Button onClick={resolve} disabled={busy !== null}><Search className="size-4" /> Lookup</Button>
+          </div>
+          {result && (
+            <div className="space-y-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge variant="accent">{agent?.display_name}</Badge>
+                <Badge variant="secondary">{agent?.status}</Badge>
+                <Mono>{agent?.id}</Mono>
+              </div>
+              <div className="grid gap-4 sm:grid-cols-4">
+                <div><div className="text-xs text-muted-foreground">Can be drawn now</div><div className="text-2xl font-bold">${remaining?.can_draw ?? '0'}</div></div>
+                <div><div className="text-xs text-muted-foreground">Window left</div><div className="text-2xl font-bold">${remaining?.remaining_window ?? '0'}</div></div>
+                <div><div className="text-xs text-muted-foreground">Lifetime left</div><div className="text-2xl font-bold">${remaining?.remaining_lifetime ?? '0'}</div></div>
+                <div><div className="text-xs text-muted-foreground">Vault available</div><div className="text-2xl font-bold">${remaining?.vault_available ?? '0'}</div></div>
+              </div>
+              <div className="grid gap-2 text-sm">
+                <div className="flex justify-between"><span className="text-muted-foreground">mandate</span><Mono>{mandate?.id ?? '—'}</Mono></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">contract</span><Mono>{mandate?.contract_address ?? 'not deployed'}</Mono></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">budget / window</span><Mono>${mandate?.budget_per_window}</Mono></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">per purchase</span><Mono>${mandate?.per_purchase_limit}</Mono></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">per seller</span><Mono>{(mandate?.per_seller_limit_bps ?? 0) / 100}%</Mono></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">max depth</span><Mono>{mandate?.max_depth}</Mono></div>
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
   );
 }
 
@@ -710,8 +910,8 @@ export function MarketplaceSection(props: SectionProps) {
         client.setAgent(agent.agent_id, agent.signing_private_key_pem);
         const w = await client.provisionWallet(agent.agent_id, 'sepolia');
         await client.creditWallet(w.wallet.id, 'USDC', '10.00');
-        await client.createPolicy({ agent_id: agent.agent_id, daily_budget: '10.00', max_transaction: '10.00', allowed_chains: ['sepolia'], allowed_categories: ['trading', 'data-purchase'], category_limits: {}, human_approval_threshold: '100.00', created_by: 'console' });
-        patch = { orgId: org.organization.id, orgName: 'Demo Org', guardianId: guardian.guardian.id, guardianToken: guardian.guardian_token, agentId: agent.agent_id, agentName: 'Demo Agent', apiKey: agent.api_key, signingKeyPem: agent.signing_private_key_pem, agentStatus: 'active', walletId: w.wallet.id, walletAddress: w.wallet.address, policy: { policy_id: 'demo', version: 1, daily_budget: '10.00', max_transaction: '10.00', category_limits: {}, human_approval_threshold: '100.00' } };
+        const m = await client.createMandate({ agent_id: agent.agent_id, budget_per_window: '10.00', window_seconds: 86400, lifetime_cap: '10.00', per_purchase_limit: '5.00', per_seller_limit_bps: 10000, max_depth: 2 });
+        patch = { orgId: org.organization.id, orgName: 'Demo Org', guardianId: guardian.guardian.id, guardianToken: guardian.guardian_token, agentId: agent.agent_id, agentName: 'Demo Agent', apiKey: agent.api_key, signingKeyPem: agent.signing_private_key_pem, agentStatus: 'active', walletId: w.wallet.id, walletAddress: w.wallet.address, mandate: { mandate_id: m.mandate_id, operator_address: m.operator_address, budget_per_window: '10.00', window_seconds: 86400, lifetime_cap: '10.00', per_purchase_limit: '5.00', per_seller_limit_bps: 10000, max_depth: 2, signature: m.signature } };
         agentId = agent.agent_id;
         toast('info', 'Demo agent provisioned — funded with testnet USDC');
       }

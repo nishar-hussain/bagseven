@@ -203,6 +203,18 @@ importers:
         specifier: workspace:*
         version: link:../db
 
+  packages/mandate:
+    dependencies:
+      '@agentos/db':
+        specifier: workspace:*
+        version: link:../db
+      '@agentos/money':
+        specifier: workspace:*
+        version: link:../money
+      drizzle-orm:
+        specifier: ^0.45.2
+        version: 0.45.2(@types/pg@8.23.1)(pg@8.23.0)
+
   packages/money:
     dependencies:
       decimal.js:
@@ -403,6 +415,9 @@ importers:
       '@agentos/events':
         specifier: workspace:*
         version: link:../../packages/events
+      '@agentos/mandate':
+        specifier: workspace:*
+        version: link:../../packages/mandate
       '@agentos/money':
         specifier: workspace:*
         version: link:../../packages/money
@@ -439,6 +454,9 @@ importers:
       '@agentos/events':
         specifier: workspace:*
         version: link:../../packages/events
+      '@agentos/mandate':
+        specifier: workspace:*
+        version: link:../../packages/mandate
       '@agentos/money':
         specifier: workspace:*
         version: link:../../packages/money

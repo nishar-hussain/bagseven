@@ -6,6 +6,26 @@ export interface Balance {
   reservedAmount: string;
 }
 
+export interface MandateSummary {
+  mandate_id: string;
+  operator_address?: string;
+  budget_per_window: string;
+  window_seconds: number;
+  lifetime_cap: string;
+  per_purchase_limit: string;
+  per_seller_limit_bps: number;
+  max_depth: number;
+  contract_address?: string | null;
+  signature?: string;
+}
+
+export interface VaultSummary {
+  vault_id: string;
+  wallet_id?: string;
+  contract_address?: string | null;
+  address?: string;
+}
+
 export interface PolicySummary {
   policy_id: string;
   version: number;
@@ -16,11 +36,17 @@ export interface PolicySummary {
 }
 
 export interface SpendDecision {
-  decision: 'allow' | 'deny' | 'pending_approval';
+  decision: 'allow' | 'deny' | 'pending_approval' | 'refused';
   reason?: string;
   decision_id: string;
   spend_token?: string;
   remaining_daily_budget?: string;
+  remaining_window?: string;
+  remaining_lifetime?: string;
+  remaining_vault?: string;
+  can_draw?: string;
+  violated_bound?: string;
+  refusal_id?: string | null;
   requires_human_approval?: boolean;
 }
 
@@ -50,6 +76,8 @@ export interface Session {
   walletId?: string;
   walletAddress?: string;
   balances: Balance[];
+  mandate?: MandateSummary;
+  vault?: VaultSummary;
   policy?: PolicySummary;
   lastDecision?: SpendRecord & { spend_token?: string };
   spendHistory: SpendRecord[];
@@ -63,6 +91,7 @@ export interface Session {
   spendForm?: { amount: string; category: string; counterparty: string };
   fundAmount?: string;
   marketplaceInput?: string;
+  tree?: Array<{ id: string; display_name: string; parent_agent_id: string | null; depth: number; share_bps: string | null; status: string }>;
 }
 
 export const EMPTY_SESSION: Session = {

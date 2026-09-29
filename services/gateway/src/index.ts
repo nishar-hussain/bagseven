@@ -14,10 +14,11 @@ function upstreamFor(path: string, cfg: NodeJS.ProcessEnv): Upstream {
   const u = (env: string) => ({ baseUrl: cfg[env] ?? '' });
   if (path.includes('/spend-summary')) return u('POLICY_URL');
   if (path.startsWith('/v1/guardian-approvals') || path.startsWith('/v1/compensations')) return u('POLICY_URL');
+  if (path.startsWith('/v1/mandates') || path.startsWith('/v1/refusals') || path.startsWith('/v1/resolve') || path.startsWith('/v1/spend-commits') || path.startsWith('/v1/spend-reversals')) return u('POLICY_URL');
   if (path.startsWith('/v1/agents') && path.includes('/receipts')) return u('VERIFICATION_URL');
   if (path.startsWith('/v1/agents') || path.startsWith('/v1/organizations') || path.startsWith('/v1/guardians')) return u('IDENTITY_URL');
   if (path.startsWith('/v1/policies') || path.startsWith('/v1/spend-intents') || path.startsWith('/v1/policy-checks')) return u('POLICY_URL');
-  if (path.startsWith('/v1/wallets') || path.startsWith('/v1/reservations')) return u('TREASURY_URL');
+  if (path.startsWith('/v1/wallets') || path.startsWith('/v1/reservations') || path.startsWith('/v1/vaults')) return u('TREASURY_URL');
   if (path.startsWith('/v1/receipts')) return u('VERIFICATION_URL');
   if (path.startsWith('/v1/tool-providers') || path.startsWith('/v1/tools') || path.startsWith('/v1/tool-executions') || path.startsWith('/v1/mcp')) return u('MARKETPLACE_URL');
   throw new ApiError(404, 'NOT_FOUND', `no upstream for ${path}`);

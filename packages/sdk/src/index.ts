@@ -29,13 +29,20 @@ export interface SpendIntent {
 }
 
 export interface SpendDecision {
-  decision: 'allow' | 'deny' | 'pending_approval';
+  decision: 'allow' | 'deny' | 'pending_approval' | 'refused';
   reason?: string;
   remaining_daily_budget?: string;
   matched_policy_rule?: string;
   requires_human_approval: boolean;
   spend_token?: string;
   decision_id: string;
+  violated_bound?: string;
+  refusal_id?: string | null;
+  mandate_id?: string;
+  remaining_window?: string;
+  remaining_lifetime?: string;
+  remaining_vault?: string;
+  can_draw?: string;
 }
 
 export interface AgentRecord {
@@ -340,6 +347,47 @@ export class Client {
     return this.request('POST', `/v1/wallets/${walletId}/credit`, input) as Promise<{
       balance: { amount: string };
     }>;
+  }
+
+  // Mandate
+  createMandate(input: {
+    agent_id: string;
+    budget_per_window: string;
+    window_seconds: number;
+    lifetime_cap: string;
+    per_purchase_limit: string;
+    per_seller_limit_bps: number;
+    max_depth: number;
+    chain?: string;
+  }): Promise<{ mandate_id: string; agent_id: string; operator_address: string; signature: string; status: string }> {
+    return this.request('POST', '/v1/mandates', input) as Promise<{ mandate_id: string; agent_id: string; operator_address: string; signature: string; status: string }>;
+  }
+
+  getActiveMandate(agentId: string): Promise<{ mandate: Record<string, unknown> }> {
+    return this.request('GET', `/v1/mandates/${agentId}/active`) as Promise<{ mandate: Record<string, unknown> }>;
+  }
+
+  mandateOverview(mandateId: string): Promise<Record<string, unknown>> {
+    return this.request('GET', `/v1/mandates/${mandateId}/overview`) as Promise<Record<string, unknown>>;
+  }
+
+  listRefusals(input: { agent_id?: string; scope?: 'all' | 'standing' | 'released' } = {}): Promise<{ refusals: Array<Record<string, unknown>>; scope: string }> {
+    const q = new URLSearchParams();
+    if (input.agent_id) q.set('agent_id', input.agent_id);
+    if (input.scope) q.set('scope', input.scope);
+    return this.request('GET', `/v1/refusals${q.size ? `?${q.toString()}` : ''}`, undefined) as Promise<{ refusals: Array<Record<string, unknown>>; scope: string }>;
+  }
+
+  resolveAgent(ref: string): Promise<Record<string, unknown>> {
+    return this.request('GET', `/v1/resolve?ref=${encodeURIComponent(ref)}`) as Promise<Record<string, unknown>>;
+  }
+
+  spawnAgent(mandateId: string, input: { parent_agent_id: string; display_name: string; share_bps: number; capabilities?: string[] }): Promise<Record<string, unknown>> {
+    return this.request('POST', `/v1/mandates/${mandateId}/spawn-agent`, input) as Promise<Record<string, unknown>>;
+  }
+
+  withdrawVault(vaultId: string, input: { amount: string; to_address?: string }): Promise<Record<string, unknown>> {
+    return this.request('POST', `/v1/vaults/${vaultId}/withdraw`, input) as Promise<Record<string, unknown>>;
   }
 
   getWallets(agentId: string): Promise<{ wallets: Array<{ wallet: { id: string; chain: string; address: string }; balances: Array<{ token: string; amount: string; reservedAmount: string }> }> }> {

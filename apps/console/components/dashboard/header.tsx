@@ -7,7 +7,11 @@ import { Bell, Server, ShieldCheck } from 'lucide-react';
 const sectionTitles: Record<Section, string> = {
   overview: 'Overview',
   identity: 'Identity',
-  treasury: 'Treasury',
+  mandate: 'Mandate',
+  agents: 'Agents',
+  vault: 'Vault',
+  refusals: 'Refusals',
+  resolve: 'Resolve',
   settle: 'Reserve & Settle',
   marketplace: 'Tool Market',
   activity: 'Activity',

@@ -108,6 +108,8 @@ export interface SpendTokenClaims {
   chain: string;
   category: string;
   counterparty_id: string | null;
+  mandate_id?: string;
+  depth?: number;
   iat: string;
   exp: string;
   jti: string;
@@ -166,4 +168,21 @@ export function generateSigningKeypair(): SigningKeypair {
     publicKeyPem: publicKey.export({ type: 'spki', format: 'pem' }).toString(),
     privateKeyPem: privateKey.export({ type: 'pkcs8', format: 'pem' }).toString(),
   };
+}
+/**
+ * Generic Ed25519 sign/verify over raw bytes, used for signing a mandate's
+ * canonical payload (the operator signs the mandate once; it cannot be edited).
+ */
+export function signBytes(payload: Uint8Array, privateKeyPem: string): string {
+  const key = createPrivateKey(privateKeyPem);
+  return ed25519Sign(null, payload, key).toString('base64');
+}
+
+export function verifyBytes(payload: Uint8Array, signatureB64: string, publicKeyPem: string): boolean {
+  try {
+    const key = createPublicKey(publicKeyPem);
+    return ed25519Verify(null, payload, key, Buffer.from(signatureB64, 'base64'));
+  } catch {
+    return false;
+  }
 }

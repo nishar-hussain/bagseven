@@ -1,10 +1,10 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { and, eq, sql } from 'drizzle-orm';
-import { agents, balances, ledgerEntries, policyChecks, reservations, settlements, toolProviders, wallets } from '@agentos/db';
-import { toMicroUnits } from '@agentos/money';
+import { agents, balances, ledgerEntries, reservations, settlements, toolProviders, vaults, wallets } from '@agentos/db';
+import { sub, toMicroUnits } from '@agentos/money';
 import { ApiError, idempotencyOnSend, idempotencyPreHandler, type ServiceDeps } from '@agentos/server';
-import { peekSpendTokenClaims, verifySpendToken } from '@agentos/auth';
+import { verifySpendToken } from '@agentos/auth';
 import { emit } from '@agentos/events';
 import { getSigner, type Signer } from './signer.js';
 
@@ -23,6 +23,21 @@ interface RealSignerWithFund extends Signer {
 
 function isRealSigner(s: Signer): s is RealSignerWithFund {
   return 'fund' in s;
+}
+
+/** True when `agentId` is `rootAgentId` or a descendant in the agent tree. */
+async function agentInTree(
+  db: ServiceDeps['db'],
+  agentId: string,
+  rootAgentId: string,
+): Promise<boolean> {
+  let cur: string | null | undefined = agentId;
+  while (cur) {
+    if (cur === rootAgentId) return true;
+    const a: { id: string; parentAgentId: string | null } | undefined = await db.query.agents.findFirst({ where: eq(agents.id, cur) });
+    cur = a?.parentAgentId ?? null;
+  }
+  return false;
 }
 
 const provisionWalletSchema = z.object({
@@ -211,38 +226,32 @@ export function buildTreasuryRoutes(app: FastifyInstance, { db, redis, config }:
     } catch (err) {
       const msg = (err as Error).message;
       if (msg === 'token expired') {
-        // Release the abandoned decision's budget so a re-proposed spend isn't
-        // double-counted, and tell the client to mint a fresh token.
-        try {
-          const peeked = peekSpendTokenClaims(body.spend_token);
-          const policyUrl = config.POLICY_URL;
-          if (policyUrl) {
-            await fetch(`${policyUrl}/v1/compensations`, {
-              method: 'POST',
-              headers: { 'content-type': 'application/json' },
-              body: JSON.stringify({
-                decision_id: peeked.decision_id,
-                agent_id: peeked.agent_id,
-                amount: peeked.amount,
-                category: peeked.category,
-              }),
-            });
-          }
-        } catch (compErr) {
-          app.log.warn({ err: compErr }, 'expired-token compensation failed (idempotent — safe to retry)');
-        }
+        // Counters move only at commit — nothing to compensate. Ask for a fresh token.
         throw new ApiError(403, 'SPEND_TOKEN_EXPIRED', 'spend token expired — create a fresh spend intent');
       }
       throw new ApiError(403, 'INVALID_SPEND_TOKEN', msg);
     }
 
-    if (claims.agent_id !== wallet.agentId) throw new ApiError(403, 'TOKEN_AGENT_MISMATCH', 'token agent does not match wallet');
     if (claims.chain !== wallet.chain) throw new ApiError(403, 'TOKEN_CHAIN_MISMATCH', 'token chain does not match wallet');
     if (claims.currency !== body.token) throw new ApiError(403, 'TOKEN_CURRENCY_MISMATCH', 'token currency does not match');
     if (claims.amount !== body.amount) throw new ApiError(403, 'TOKEN_AMOUNT_MISMATCH', 'token amount does not match');
     const tokenCounterparty = claims.counterparty_id ?? null;
     if (tokenCounterparty !== (body.counterparty_id ?? null)) {
       throw new ApiError(403, 'TOKEN_COUNTERPARTY_MISMATCH', 'token counterparty does not match');
+    }
+
+    // Mandate-tree binding: this wallet may be a mandate's VAULT. The spending
+    // agent named in the token must belong to the vault's tree, and the token's
+    // mandate must match the vault. Legacy per-agent wallets keep the old check.
+    const vault = await db.query.vaults.findFirst({ where: eq(vaults.walletId, wallet.id) });
+    if (vault) {
+      if (claims.mandate_id && claims.mandate_id !== vault.mandateId) {
+        throw new ApiError(403, 'TOKEN_MANDATE_MISMATCH', 'token mandate does not match wallet vault');
+      }
+      const inTree = await agentInTree(db, claims.agent_id, vault.rootAgentId);
+      if (!inTree) throw new ApiError(403, 'TOKEN_AGENT_MISMATCH', 'token agent is not in the wallet vault tree');
+    } else if (claims.agent_id !== wallet.agentId) {
+      throw new ApiError(403, 'TOKEN_AGENT_MISMATCH', 'token agent does not match wallet');
     }
 
     // Single-use enforcement.
@@ -315,6 +324,33 @@ export function buildTreasuryRoutes(app: FastifyInstance, { db, redis, config }:
     const signer = getSigner(wallet.chain);
     const payee = await resolvePayee(db, reservation.counterpartyType, reservation.counterpartyId, wallet.chain);
 
+    // Mandate enforcement at commit (mirrors BagMandate.attemptAndCommit):
+    // atomically re-check the bounds and increment window/lifetime/seller
+    // counters on the mandate service. A now-violated bound refuses the spend.
+    const vault = await db.query.vaults.findFirst({ where: eq(vaults.walletId, wallet.id) });
+    const mandateUrl = config.MANDATE_URL ?? config.POLICY_URL;
+    const vaultBalance = await db.query.balances.findFirst({
+      where: and(eq(balances.walletId, wallet.id), eq(balances.token, reservation.token)),
+    });
+    const vaultAvailable = vaultBalance ? sub(vaultBalance.amount, vaultBalance.reservedAmount) : '0';
+    if (vault && mandateUrl) {
+      const commitRes = await fetch(`${mandateUrl}/v1/spend-commits`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          mandate_id: vault.mandateId,
+          agent_id: wallet.agentId,
+          amount: reservation.amount,
+          seller: reservation.counterpartyId ?? null,
+          vault_available: vaultAvailable,
+        }),
+      });
+      const commitBody = (await commitRes.json()) as { ok?: boolean; reason?: string; error?: { message?: string } };
+      if (!commitRes.ok || !commitBody.ok) {
+        throw new ApiError(403, 'BOUND_VIOLATION', commitBody.reason ?? commitBody.error?.message ?? 'mandate bound violated at commit');
+      }
+    }
+
     // Slice 1.6: hard platform-level spending cap (guarded signing). Atomic
     // check-and-increment so concurrent commits can't jointly exceed it.
     const capStr = config.PLATFORM_MAX_TOTAL_SPEND;
@@ -342,8 +378,20 @@ export function buildTreasuryRoutes(app: FastifyInstance, { db, redis, config }:
         token: reservation.token,
       });
     } catch (err) {
-      // Roll back the platform-cap counter — the settlement did not happen.
+      // Roll back the platform-cap counter AND reverse the mandate counters —
+      // the settlement did not happen.
       if (capStr) await redis.decrby('platform:committed_spend', Number(toMicroUnits(reservation.amount)));
+      if (vault && mandateUrl) {
+        try {
+          await fetch(`${mandateUrl}/v1/spend-reversals`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ mandate_id: vault.mandateId, amount: reservation.amount, seller: reservation.counterpartyId ?? null }),
+          });
+        } catch {
+          /* best effort */
+        }
+      }
       throw new ApiError(402, 'SETTLEMENT_FAILED', `settlement failed on-chain: ${(err as Error).message}`);
     }
 
@@ -445,10 +493,8 @@ export function buildTreasuryRoutes(app: FastifyInstance, { db, redis, config }:
   app.post('/v1/reservations/:id/release', async (req) => {
     const { id } = req.params as { id: string };
     const reservation = await db.query.reservations.findFirst({ where: eq(reservations.id, id) });
-    if (!reservation) throw new ApiError(404, 'NOT_FOUND', 'reservation not found');
+if (!reservation) throw new ApiError(404, 'NOT_FOUND', 'reservation not found');
     if (reservation.status !== 'held') throw new ApiError(409, 'INVALID_STATE', `reservation is ${reservation.status}`);
-
-    const wallet = await db.query.wallets.findFirst({ where: eq(wallets.id, reservation.walletId) });
 
     await db.transaction(async (tx) => {
       await tx.update(reservations).set({ status: 'released' }).where(eq(reservations.id, id));
@@ -460,28 +506,47 @@ export function buildTreasuryRoutes(app: FastifyInstance, { db, redis, config }:
 
     await emit(db, 'treasury.reservation.released', reservation.id, { reservation_id: id, reason: 'released_by_caller' });
 
-    // D1: the budget counter was incremented at token issuance — release compensates it.
-    const policyUrl = config.POLICY_URL;
-    if (policyUrl && wallet) {
+    return { reservation_id: id, status: 'released' };
+  });
+
+  // Withdraw from a mandate's vault. Only reduces the AVAILABLE balance (never
+  // reserved funds). With a real signer this moves USDC on-chain; dev signer is
+  // a pure ledger debit.
+  app.post('/v1/vaults/:id/withdraw', async (req) => {
+    const { id } = req.params as { id: string };
+    const body = z
+      .object({ amount: z.string().min(1), to_address: z.string().regex(/^0x[0-9a-fA-F]{40}$/).optional() })
+      .parse(req.body);
+    const vault = await db.query.vaults.findFirst({ where: eq(vaults.id, id) });
+    if (!vault) throw new ApiError(404, 'NOT_FOUND', 'vault not found');
+    const wallet = await db.query.wallets.findFirst({ where: eq(wallets.id, vault.walletId) });
+    if (!wallet) throw new ApiError(404, 'NOT_FOUND', 'vault wallet not found');
+
+    const bal = await db.query.balances.findFirst({ where: and(eq(balances.walletId, wallet.id), eq(balances.token, 'USDC')) });
+    if (!bal) throw new ApiError(404, 'NOT_FOUND', 'vault has no USDC balance');
+    const available = sub(bal.amount, bal.reservedAmount);
+    if (toMicroUnits(body.amount) > toMicroUnits(available)) {
+      throw new ApiError(409, 'INSUFFICIENT_AVAILABLE', `vault available ${available} is less than withdrawal ${body.amount}`);
+    }
+
+    let txHash: string | undefined;
+    if (body.to_address) {
+      const signer = getSigner(wallet.chain);
       try {
-        const pc = await db.query.policyChecks.findFirst({ where: eq(policyChecks.decisionId, reservation.policyDecisionId) });
-        const action = pc?.requestedAction as { category?: string } | undefined;
-        await fetch(`${policyUrl}/v1/compensations`, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({
-            decision_id: reservation.policyDecisionId,
-            agent_id: wallet.agentId,
-            amount: reservation.amount,
-            category: action?.category ?? 'general',
-          }),
-        });
+        const payment = await signer.signAndSubmit({ agentId: wallet.agentId, to: body.to_address, amount: body.amount, token: 'USDC' });
+        txHash = payment.txHash;
       } catch (err) {
-        app.log.warn({ err }, 'budget compensation call failed (idempotent — safe to retry)');
+        throw new ApiError(402, 'WITHDRAW_FAILED', `withdraw failed on-chain: ${(err as Error).message}`);
       }
     }
 
-    return { reservation_id: id, status: 'released' };
+    const [updated] = await db
+      .update(balances)
+      .set({ amount: sql`amount - ${body.amount}::numeric` })
+      .where(and(eq(balances.walletId, wallet.id), eq(balances.token, 'USDC')))
+      .returning();
+    await emit(db, 'treasury.vault.withdrawn', wallet.agentId, { vault_id: id, amount: body.amount, to_address: body.to_address ?? null });
+    return { vault_id: id, balance: updated, tx_hash: txHash };
   });
 
   // Lifecycle: sweep an agent's full on-chain balance to a target address (used on retire).

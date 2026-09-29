@@ -23,6 +23,7 @@
     "@agentos/auth": "workspace:*",
     "@agentos/db": "workspace:*",
     "@agentos/events": "workspace:*",
+    "@agentos/mandate": "workspace:*",
     "@agentos/money": "workspace:*",
     "@agentos/server": "workspace:*",
     "@agentos/testing": "workspace:*",

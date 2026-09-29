@@ -34,6 +34,8 @@ export const agents = pgTable(
       .notNull()
       .references(() => guardians.id),
     parentAgentId: uuid('parent_agent_id').references((): AnyPgColumn => agents.id),
+    mandateId: uuid('mandate_id'),
+    shareOfParentBps: numeric('share_of_parent_bps', { precision: 10, scale: 2 }),
     displayName: text('display_name').notNull(),
     status: agentStatus('status').notNull().default('pending'),
     currentVersionId: uuid('current_version_id'),

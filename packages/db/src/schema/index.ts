@@ -1,5 +1,6 @@
 export * from './identity.js';
 export * from './policy.js';
+export * from './mandate.js';
 export * from './treasury.js';
 export * from './ledger.js';
 export * from './verification.js';

@@ -107,13 +107,54 @@ export class ConsoleClient {
   createPolicy(input: Record<string, unknown>) {
     return this.request<{ policy_id: string; version: number }>('POST', '/v1/policies', input);
   }
+
+  // Mandate
+  createMandate(input: {
+    agent_id: string;
+    budget_per_window: string;
+    window_seconds: number;
+    lifetime_cap: string;
+    per_purchase_limit: string;
+    per_seller_limit_bps: number;
+    max_depth: number;
+    chain?: string;
+  }) {
+    return this.request<{ mandate_id: string; agent_id: string; operator_address: string; signature: string; status: string }>('POST', '/v1/mandates', input);
+  }
+  getActiveMandate(agentId: string) {
+    return this.request<{ mandate: Record<string, unknown> }>('GET', `/v1/mandates/${agentId}/active`);
+  }
+  mandateOverview(mandateId: string) {
+    return this.request<Record<string, unknown>>('GET', `/v1/mandates/${mandateId}/overview`);
+  }
+  listRefusals(agentId?: string, scope: 'all' | 'standing' | 'released' = 'all') {
+    const q = new URLSearchParams();
+    if (agentId) q.set('agent_id', agentId);
+    q.set('scope', scope);
+    return this.request<{ refusals: Array<Record<string, unknown>>; scope: string }>('GET', `/v1/refusals?${q.toString()}`);
+  }
+  resolveAgent(ref: string) {
+    return this.request<Record<string, unknown>>('GET', `/v1/resolve?ref=${encodeURIComponent(ref)}`);
+  }
+  spawnAgent(mandateId: string, input: { parent_agent_id: string; display_name: string; share_bps: number }) {
+    return this.request<Record<string, unknown>>('POST', `/v1/mandates/${mandateId}/spawn-agent`, input);
+  }
+  withdrawVault(vaultId: string, input: { amount: string; to_address?: string }) {
+    return this.request<Record<string, unknown>>('POST', `/v1/vaults/${vaultId}/withdraw`, input);
+  }
   spendIntent(input: Record<string, unknown>, idempotencyKey: string) {
     return this.request<{
-      decision: 'allow' | 'deny' | 'pending_approval';
+      decision: 'allow' | 'deny' | 'pending_approval' | 'refused';
       reason?: string;
       decision_id: string;
       spend_token?: string;
       remaining_daily_budget?: string;
+      remaining_window?: string;
+      remaining_lifetime?: string;
+      remaining_vault?: string;
+      can_draw?: string;
+      violated_bound?: string;
+      refusal_id?: string | null;
       requires_human_approval?: boolean;
     }>('POST', '/v1/spend-intents', input, { idempotencyKey });
   }
