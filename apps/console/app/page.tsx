@@ -1,9 +1,9 @@
 'use client';
 
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Client } from '../lib/client';
 import { EMPTY_SESSION, type Session, type Toast } from '../lib/types';
-import { connectWallet, hasWallet } from '../lib/wallet';
+import { connectWallet, getCurrentAccount, hasWallet, shortAddress, watchAccountChanges } from '../lib/wallet';
 
 import { Header } from '../components/dashboard/header';
 import { OverviewSection, MandateSection, AgentsSection, RefusalsSection, ResolveSection } from '../components/dashboard/sections';
@@ -51,6 +51,31 @@ export default function Page() {
   const onDisconnectWallet = useCallback(() => {
     setSession((s) => ({ ...s, ownerAddress: undefined }));
     toast('info', 'Wallet disconnected');
+  }, [toast]);
+
+  // Always track the CURRENT MetaMask account: re-read it on mount and listen
+  // for account switches so the header never shows a stale address.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const account = await getCurrentAccount();
+      if (cancelled) return;
+      if (account) setSession((s) => ({ ...s, ownerAddress: account }));
+    })();
+    const off = watchAccountChanges((accounts) => {
+      const account = accounts[0];
+      if (cancelled) return;
+      if (account) {
+        setSession((s) => ({ ...s, ownerAddress: account }));
+        toast('info', `Account switched → ${shortAddress(account)}`);
+      } else {
+        setSession((s) => ({ ...s, ownerAddress: undefined }));
+      }
+    });
+    return () => {
+      cancelled = true;
+      off();
+    };
   }, [toast]);
 
   const sectionProps = { session, client, busy, persist, run, toast };

@@ -8,6 +8,8 @@ declare global {
   interface Window {
     ethereum?: {
       request: (args: { method: string; params?: unknown[] | object }) => Promise<unknown>;
+      on?: (event: string, cb: (...args: unknown[]) => void) => void;
+      removeListener?: (event: string, cb: (...args: unknown[]) => void) => void;
     };
   }
 }
@@ -25,6 +27,29 @@ export async function connectWallet(): Promise<string> {
   const address = accounts[0];
   if (!address) throw new Error('No account selected');
   return address;
+}
+
+/** Read the CURRENTLY selected account without prompting (eth_accounts). */
+export async function getCurrentAccount(): Promise<string | null> {
+  const eth = window.ethereum;
+  if (!eth) return null;
+  try {
+    const accounts = (await eth.request({ method: 'eth_accounts' })) as string[];
+    return accounts[0] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Subscribe to MetaMask account switches so the UI always tracks the account
+ * the user is actually on. Returns an unsubscribe function.
+ */
+export function watchAccountChanges(cb: (accounts: string[]) => void): () => void {
+  const eth = window.ethereum;
+  if (!eth?.on) return () => undefined;
+  eth.on('accountsChanged', cb as (...args: unknown[]) => void);
+  return () => eth.removeListener?.('accountsChanged', cb as (...args: unknown[]) => void);
 }
 
 export function shortAddress(a: string): string {
