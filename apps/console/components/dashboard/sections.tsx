@@ -1,12 +1,10 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Client } from '../../lib/client';
 import type { Session } from '../../lib/types';
 import {
   CHAIN_ID,
-  connectWallet,
-  hasWallet,
   mandateCanonical,
   shortAddress,
   signMessage,
@@ -116,7 +114,7 @@ export function MandateSection(props: SectionProps) {
   const [perPurchase, setPerPurchase] = useState('1');
   const [sellerPct, setSellerPct] = useState('35');
   const [maxDepth, setMaxDepth] = useState('3');
-  const [operator, setOperator] = useState('');
+  const [operator, setOperator] = useState(session.operatorAddress ?? '');
   const [fundAmt, setFundAmt] = useState('50');
   const [withdrawAmt, setWithdrawAmt] = useState('10');
   const [spendAmt, setSpendAmt] = useState('0.50');
@@ -124,17 +122,13 @@ export function MandateSection(props: SectionProps) {
   const [last, setLast] = useState<{ decision?: string; bound?: string; tx_hash?: string } | null>(null);
 
   const windowSeconds = windowH === '24 hours' ? 86400 : windowH === '12 hours' ? 43200 : 3600;
-  // The operator defaults to the connected creator wallet — the key you provide.
-  const effectiveOperator = ((session.operatorAddress ?? operator.trim()) || session.ownerAddress) || '';
+  // The typed value is the operator; if left empty it falls back to your creator wallet.
+  const effectiveOperator = operator.trim() || session.ownerAddress || '';
 
-  const connectOperator = () =>
-    run('connect operator', async () => {
-      if (!hasWallet()) throw new Error('No browser wallet detected');
-      const addr = await connectWallet();
-      persist({ ...session, operatorAddress: addr });
-      setOperator(addr);
-      toast('ok', `Operator set to ${shortAddress(addr)}`);
-    });
+  // Restore the persisted operator into the field after a refresh.
+  useEffect(() => {
+    if (!operator && session.operatorAddress) setOperator(session.operatorAddress);
+  }, [operator, session.operatorAddress]);
 
   const sign = () =>
     run('sign mandate', async () => {
@@ -283,10 +277,7 @@ export function MandateSection(props: SectionProps) {
           <div className={card}>
             <h2 className="text-[15px] font-semibold text-neutral-900">Operator</h2>
             <p className="text-[12px] text-neutral-400 mt-0.5 mb-4">The key you provide — defaults to your connected wallet. Fixed here and cannot be changed later.</p>
-            <div className="flex items-center gap-2">
-              <input className={input} value={effectiveOperator} onChange={(e) => { setOperator(e.target.value); persist({ ...session, operatorAddress: e.target.value || undefined }); }} placeholder="0x…" />
-              <button onClick={connectOperator} disabled={busy !== null} className={btnGhost}>Use my wallet</button>
-            </div>
+            <input className={input} value={operator} onChange={(e) => setOperator(e.target.value)} placeholder="0x…" />
             {effectiveOperator && <div className="mt-2 text-xs text-neutral-500 font-mono">Operator = {shortAddress(effectiveOperator)}</div>}
           </div>
         </div>
