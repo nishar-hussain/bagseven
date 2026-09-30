@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Client } from '../lib/client';
 import { EMPTY_SESSION, type Session, type Toast } from '../lib/types';
-import { connectWallet, hasWallet, shortAddress, watchAccountChanges } from '../lib/wallet';
+import { connectWallet, getWalletAccounts, hasWallet, shortAddress, watchAccountChanges } from '../lib/wallet';
 
 import { Header } from '../components/dashboard/header';
 import { OverviewSection, MandateSection, AgentsSection, RefusalsSection, ResolveSection } from '../components/dashboard/sections';
@@ -53,29 +53,50 @@ export default function Page() {
     toast('info', 'Wallet disconnected');
   }, [toast]);
 
-  // Always track the CURRENT MetaMask account live. We deliberately do NOT
-  // auto-claim an account from eth_accounts on mount (that can return a stale
-  // previously-authorized account); the user explicitly connects, and real
-  // account switches arrive via accountsChanged.
-  useEffect(() => {
-    let cancelled = false;
-    const off = watchAccountChanges((accounts) => {
-      if (cancelled) return;
-      const account = accounts[0];
-      if (account) {
-        setSession((s) => ({ ...s, ownerAddress: account }));
-        toast('info', `Account switched → ${shortAddress(account)}`);
-      } else {
-        setSession((s) => ({ ...s, ownerAddress: undefined }));
-      }
-    });
-    return () => {
-      cancelled = true;
-      off();
-    };
-  }, [toast]);
+  // Keep the connection across refreshes: restore the persisted session, reconcile
+// the owner against the wallet's authorized accounts (never claim a stale one),
+// and follow live account switches via accountsChanged.
+useEffect(() => {
+  let cancelled = false;
+  (async () => {
+    try {
+      const raw = localStorage.getItem('bagseven-session');
+      if (raw) setSession({ ...EMPTY_SESSION, ...JSON.parse(raw) });
+    } catch { /* ignore */ }
+    const accounts = await getWalletAccounts();
+    if (cancelled) return;
+    if (accounts.length > 0) {
+      setSession((s) => {
+        const cur = s.ownerAddress?.toLowerCase();
+        if (!cur || !accounts.some((a) => a.toLowerCase() === cur)) {
+          return { ...s, ownerAddress: accounts[0] };
+        }
+        return s;
+      });
+    }
+  })();
+  const off = watchAccountChanges((accounts) => {
+    if (cancelled) return;
+    const account = accounts[0];
+    if (account) {
+      setSession((s) => ({ ...s, ownerAddress: account }));
+      toast('info', `Account switched → ${shortAddress(account)}`);
+    } else {
+      setSession((s) => ({ ...s, ownerAddress: undefined }));
+    }
+  });
+  return () => {
+    cancelled = true;
+    off();
+  };
+}, [toast]);
 
-  const sectionProps = { session, client, busy, persist, run, toast };
+// Persist the session so a refresh keeps the wallet connection + operator key.
+useEffect(() => {
+  try { localStorage.setItem('bagseven-session', JSON.stringify(session)); } catch { /* ignore */ }
+}, [session]);
+
+const sectionProps = { session, client, busy, persist, run, toast };
 
   return (
     <div className="min-h-screen bg-[#f5f6f8] text-[#111827] flex flex-col">

@@ -31,13 +31,18 @@ export async function connectWallet(): Promise<string> {
 
 /** Read the CURRENTLY selected account without prompting (eth_accounts). */
 export async function getCurrentAccount(): Promise<string | null> {
+  const accounts = await getWalletAccounts();
+  return accounts[0] ?? null;
+}
+
+/** Read all accounts the wallet has authorized for this site (no prompt). */
+export async function getWalletAccounts(): Promise<string[]> {
   const eth = window.ethereum;
-  if (!eth) return null;
+  if (!eth) return [];
   try {
-    const accounts = (await eth.request({ method: 'eth_accounts' })) as string[];
-    return accounts[0] ?? null;
+    return (await eth.request({ method: 'eth_accounts' })) as string[];
   } catch {
-    return null;
+    return [];
   }
 }
 
