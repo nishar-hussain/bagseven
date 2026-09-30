@@ -23,7 +23,6 @@ export interface AgentRow {
 export interface Session {
   ownerAddress?: string;
   operatorAddress?: string;
-  operatorKey?: string;
   mandate?: MandateSession;
   tree?: AgentRow[];
   vaultBalance?: string;

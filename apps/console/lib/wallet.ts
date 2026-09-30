@@ -1,7 +1,5 @@
 'use client';
 
-import { privateKeyToAccount, generatePrivateKey } from 'viem/accounts';
-import { signTypedData } from 'viem/accounts';
 import { canonicalMandate, canonicalSpawn, canonicalWithdraw, spendIntentDomain, spendIntentTypes, type SpendIntent } from '@agentos/onchain';
 
 declare global {
@@ -69,22 +67,35 @@ export async function signMessage(message: string): Promise<string> {
   return signature;
 }
 
-/** Generate a fresh operator hot key for the agent (stored in the session). */
-export function generateOperatorKey(): { address: string; privateKey: string } {
-  const privateKey = generatePrivateKey();
-  const account = privateKeyToAccount(privateKey);
-  return { address: account.address, privateKey };
-}
-
-/** The operator signs an EIP-712 spend intent with its browser-held key. */
-export async function signSpendIntent(intent: SpendIntent, privateKey: string): Promise<string> {
-  return signTypedData({
-    privateKey: privateKey as `0x${string}`,
-    domain: spendIntentDomain(intent.chainId),
-    types: spendIntentTypes,
+/**
+ * The operator (which you set to the key you control — your creator wallet)
+ * signs an EIP-712 spend intent through MetaMask. No browser-held key needed.
+ */
+export async function signSpendIntent(intent: SpendIntent, address: string): Promise<string> {
+  const eth = window.ethereum;
+  if (!eth) throw new Error('No browser wallet found');
+  const typedData = {
+    types: {
+      EIP712Domain: [
+        { name: 'name', type: 'string' },
+        { name: 'version', type: 'string' },
+        { name: 'chainId', type: 'uint256' },
+      ],
+      ...spendIntentTypes,
+    },
     primaryType: 'SpendIntent',
-    message: { ...intent, nonce: BigInt(intent.nonce), timestamp: BigInt(intent.timestamp), chainId: BigInt(intent.chainId) },
-  });
+    domain: spendIntentDomain(intent.chainId),
+    message: {
+      agentId: intent.agentId,
+      amount: intent.amount,
+      recipient: intent.recipient,
+      nonce: String(intent.nonce),
+      timestamp: String(intent.timestamp),
+      chainId: String(intent.chainId),
+    },
+  };
+  const signature = (await eth.request({ method: 'eth_signTypedData_v4', params: [address, JSON.stringify(typedData)] })) as string;
+  return signature;
 }
 
 export function mandateCanonical(input: {

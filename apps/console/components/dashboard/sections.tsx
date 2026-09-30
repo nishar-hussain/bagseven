@@ -6,7 +6,6 @@ import type { Session } from '../../lib/types';
 import {
   CHAIN_ID,
   connectWallet,
-  generateOperatorKey,
   hasWallet,
   mandateCanonical,
   shortAddress,
@@ -125,14 +124,8 @@ export function MandateSection(props: SectionProps) {
   const [last, setLast] = useState<{ decision?: string; bound?: string; tx_hash?: string } | null>(null);
 
   const windowSeconds = windowH === '24 hours' ? 86400 : windowH === '12 hours' ? 43200 : 3600;
-  const effectiveOperator = session.operatorAddress ?? operator.trim();
-
-  const genOperator = () => {
-    const k = generateOperatorKey();
-    persist({ ...session, operatorAddress: k.address, operatorKey: k.privateKey });
-    setOperator(k.address);
-    toast('ok', `Operator key generated ${shortAddress(k.address)}`);
-  };
+  // The operator defaults to the connected creator wallet — the key you provide.
+  const effectiveOperator = ((session.operatorAddress ?? operator.trim()) || session.ownerAddress) || '';
 
   const connectOperator = () =>
     run('connect operator', async () => {
@@ -146,7 +139,7 @@ export function MandateSection(props: SectionProps) {
   const sign = () =>
     run('sign mandate', async () => {
       if (!session.ownerAddress) throw new Error('connect your wallet first (top right)');
-      if (!effectiveOperator) throw new Error('set an operator address or generate an operator key');
+      if (!effectiveOperator) throw new Error('enter an operator address (or connect your wallet)');
       const canonical = mandateCanonical({ owner: session.ownerAddress, operator: effectiveOperator, budgetPerWindow: budget, windowSeconds, lifetimeCap: lifetime, perPurchaseCap: perPurchase, perSellerPct: Math.round(Number(sellerPct) * 100), maxDepth: Number(maxDepth) });
       const signature = await signMessage(canonical);
       const m = await client.createMandate({
@@ -161,7 +154,7 @@ export function MandateSection(props: SectionProps) {
         chain_id: CHAIN_ID,
         signature,
       });
-      persist({ ...session, mandate: { mandate_id: m.mandate_id, root_agent_id: m.root_agent_id, contract_address: m.contract_address, owner_address: session.ownerAddress, operator_address: effectiveOperator, budget_per_window: budget, window_seconds: windowSeconds, lifetime_cap: lifetime, per_purchase_cap: perPurchase, per_seller_pct: Math.round(Number(sellerPct) * 100), max_depth: Number(maxDepth) } });
+      persist({ ...session, operatorAddress: effectiveOperator, mandate: { mandate_id: m.mandate_id, root_agent_id: m.root_agent_id, contract_address: m.contract_address, owner_address: session.ownerAddress, operator_address: effectiveOperator, budget_per_window: budget, window_seconds: windowSeconds, lifetime_cap: lifetime, per_purchase_cap: perPurchase, per_seller_pct: Math.round(Number(sellerPct) * 100), max_depth: Number(maxDepth) } });
       toast('ok', `Mandate signed by ${shortAddress(session.ownerAddress)} — immutable`);
     });
 
@@ -187,11 +180,11 @@ export function MandateSection(props: SectionProps) {
   const spend = () =>
     run('spend intent', async () => {
       if (!session.mandate) throw new Error('sign a mandate first');
-      if (!session.operatorKey) throw new Error('generate an operator key first (it signs the intent)');
-      if (!session.operatorAddress) throw new Error('operator not set');
+      if (!session.ownerAddress) throw new Error('connect your wallet first (it signs the spend)');
       const agentId = session.mandate.root_agent_id;
       const nonce = Math.floor(Date.now() / 1000);
-      const signature = await signSpendIntent({ agentId, amount: spendAmt, recipient: recipient.trim() as `0x${string}`, nonce, timestamp: nonce, chainId: CHAIN_ID }, session.operatorKey);
+      // The operator is the key you provided (your creator wallet) — MetaMask signs.
+      const signature = await signSpendIntent({ agentId, amount: spendAmt, recipient: recipient.trim() as `0x${string}`, nonce, timestamp: nonce, chainId: CHAIN_ID }, session.ownerAddress);
       const res = await client.spendIntent({ agent_id: agentId, amount: spendAmt, recipient: recipient.trim(), nonce, timestamp: nonce, chain_id: CHAIN_ID, signature });
       setLast(res);
       toast(res.decision === 'allow' ? 'ok' : 'info', res.decision === 'allow' ? `Executed on-chain ${res.tx_hash?.slice(0, 14)}…` : `Refused — ${res.bound}`);
@@ -236,13 +229,13 @@ export function MandateSection(props: SectionProps) {
 
           <div className="space-y-3">
             <h2 className="text-base font-semibold text-neutral-900">Spend intent</h2>
-            <p className="text-xs text-neutral-500">Signed by the agent's operator key (EIP-712). The contract enforces every bound.</p>
+            <p className="text-xs text-neutral-500">Signed by the operator (your creator wallet, EIP-712 via MetaMask). The contract enforces every bound.</p>
             <div className="grid grid-cols-2 gap-2">
               <input className={input} value={spendAmt} onChange={(e) => setSpendAmt(e.target.value)} placeholder="0.50" />
               <input className={input} value={recipient} onChange={(e) => setRecipient(e.target.value)} placeholder="0x recipient" />
             </div>
-            <button onClick={spend} disabled={busy !== null || !session.operatorKey} className={btn}>Run and pay ${spendAmt}</button>
-            {!session.operatorKey && <p className="text-xs text-amber-600">Generate an operator key below to sign spends.</p>}
+            <button onClick={spend} disabled={busy !== null || !session.ownerAddress} className={btn}>Run and pay ${spendAmt}</button>
+            {!session.ownerAddress && <p className="text-xs text-amber-600">Connect your wallet to sign spends.</p>}
             {last && (
               <div className="text-xs space-y-1">
                 <span className={`inline-flex px-2 py-0.5 rounded-full ${last.decision === 'allow' ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>{last.decision}</span>
@@ -289,13 +282,12 @@ export function MandateSection(props: SectionProps) {
 
           <div className={card}>
             <h2 className="text-[15px] font-semibold text-neutral-900">Operator</h2>
-            <p className="text-[12px] text-neutral-400 mt-0.5 mb-4">The agent's hot key. Fixed here and cannot be changed later.</p>
+            <p className="text-[12px] text-neutral-400 mt-0.5 mb-4">The key you provide — defaults to your connected wallet. Fixed here and cannot be changed later.</p>
             <div className="flex items-center gap-2">
-              <input className={input} value={effectiveOperator} onChange={(e) => { setOperator(e.target.value); }} placeholder="0x…" readOnly={!!session.operatorAddress} />
-              <button onClick={genOperator} className={btnGhost}>Generate key</button>
-              <button onClick={connectOperator} disabled={busy !== null} className={btnGhost}>Connect</button>
+              <input className={input} value={effectiveOperator} onChange={(e) => { setOperator(e.target.value); persist({ ...session, operatorAddress: e.target.value || undefined }); }} placeholder="0x…" />
+              <button onClick={connectOperator} disabled={busy !== null} className={btnGhost}>Use my wallet</button>
             </div>
-            {session.operatorAddress && <div className="mt-2 text-xs text-neutral-500 font-mono">Operator = {shortAddress(session.operatorAddress)}</div>}
+            {effectiveOperator && <div className="mt-2 text-xs text-neutral-500 font-mono">Operator = {shortAddress(effectiveOperator)}</div>}
           </div>
         </div>
 
