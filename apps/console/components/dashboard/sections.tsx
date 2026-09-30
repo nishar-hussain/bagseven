@@ -41,9 +41,6 @@ export function OverviewSection(props: SectionProps) {
   const [withdrawAmt, setWithdrawAmt] = useState('0');
   const [spawnOperator, setSpawnOperator] = useState('');
   const [spawnShare, setSpawnShare] = useState('50');
-  const [spendAmt, setSpendAmt] = useState('0.50');
-  const [recipient, setRecipient] = useState('');
-  const [last, setLast] = useState<{ decision?: string; bound?: string; tx_hash?: string } | null>(null);
 
   const load = () =>
     run('load overview', async () => {
@@ -74,19 +71,6 @@ export function OverviewSection(props: SectionProps) {
       persist({ ...session, vaultBalance: res.vault_balance });
       setWithdrawOpen(false);
       toast('ok', `Withdrew $${withdrawAmt} — balance $${res.vault_balance}`);
-      await load();
-    });
-
-  const spend = () =>
-    run('spend intent', async () => {
-      if (!session.mandate) throw new Error('sign a mandate first');
-      if (!session.ownerAddress) throw new Error('connect your wallet first (it signs the spend)');
-      if (!recipient.trim()) throw new Error('enter a recipient address');
-      const nonce = Math.floor(Date.now() / 1000);
-      const signature = await signSpendIntent({ agentId: session.mandate.root_agent_id, amount: spendAmt, recipient: recipient.trim() as `0x${string}`, nonce, timestamp: nonce, chainId: CHAIN_ID }, session.ownerAddress);
-      const res = await client.spendIntent({ agent_id: session.mandate.root_agent_id, amount: spendAmt, recipient: recipient.trim(), nonce, timestamp: nonce, chain_id: CHAIN_ID, signature });
-      setLast(res);
-      toast(res.decision === 'allow' ? 'ok' : 'info', res.decision === 'allow' ? `Executed on-chain ${res.tx_hash?.slice(0, 14)}…` : `Refused — ${res.bound}`);
       await load();
     });
 
@@ -138,6 +122,8 @@ export function OverviewSection(props: SectionProps) {
   const refusals = data.recent_refusals ?? [];
   const contract = session.mandate.contract_address;
   const contractShort = contract ? `${contract.slice(0, 8)}…${contract.slice(-4)}` : '';
+  const fmt = (v: unknown) => (Number.isFinite(Number(v)) ? Number(v).toFixed(2) : '0.00');
+  const money = (v: unknown) => `$${fmt(v)}`;
 
   const stat = (label: string, value: string, hint?: string) => (
     <div className={card}>
@@ -173,29 +159,10 @@ export function OverviewSection(props: SectionProps) {
 
       {/* Stats */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        {stat('Spent this window', `$${data.spent_this_window ?? '0.00'} of $${data.budget_per_window ?? '0'}`, 'Across the whole tree · resets every 24 hours')}
-        {stat('Spent in total', `$${data.spent_total ?? '0.00'} of $${data.lifetime_cap ?? '0'}`, 'The lifetime cap never refills')}
-        {stat('Can be drawn now', `$${data.can_be_drawn_now ?? '0.00'}`, 'The tightest bound on the root, including the vault')}
+        {stat('Spent this window', `${money(data.spent_this_window)} of ${money(data.budget_per_window)}`, 'Across the whole tree · resets every 24 hours')}
+        {stat('Spent in total', `${money(data.spent_total)} of ${money(data.lifetime_cap)}`, 'The lifetime cap never refills')}
+        {stat('Can be drawn now', money(data.can_be_drawn_now), 'The tightest bound on the root, including the vault')}
         {stat('Agents', String(agents.length), `${live} live · ${revoked} revoked · ${levels} level${levels > 1 ? 's' : ''}`)}
-      </div>
-
-      {/* Spend intent */}
-      <div className={card}>
-        <h2 className="text-base font-semibold text-neutral-900">Spend intent</h2>
-        <p className="text-xs text-neutral-400 mt-0.5 mb-3">Signed by the operator (your creator wallet, EIP-712). The contract enforces every bound.</p>
-        <div className="flex flex-wrap gap-2">
-          <input className={`${input} !w-28`} value={spendAmt} onChange={(e) => setSpendAmt(e.target.value)} placeholder="0.50" />
-          <input className={`${input} flex-1 min-w-[220px]`} value={recipient} onChange={(e) => setRecipient(e.target.value)} placeholder="0x recipient" />
-          <button onClick={spend} disabled={busy !== null || !session.ownerAddress} className={btn}>Run and pay ${spendAmt}</button>
-        </div>
-        {!session.ownerAddress && <p className="mt-2 text-xs text-amber-600">Connect your wallet to sign spends.</p>}
-        {last && (
-          <div className="mt-3 text-xs space-y-1">
-            <span className={`inline-flex px-2 py-0.5 rounded-full ${last.decision === 'allow' ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>{last.decision}</span>
-            {last.bound && <span className="ml-1 text-neutral-500">bound: {last.bound}</span>}
-            {last.tx_hash && <div className="font-mono text-neutral-500">{last.tx_hash.slice(0, 24)}…</div>}
-          </div>
-        )}
       </div>
 
       {/* Spawn agent modal */}
@@ -216,7 +183,7 @@ export function OverviewSection(props: SectionProps) {
                 <input className={`${input} flex-1`} value={spawnShare} onChange={(e) => setSpawnShare(e.target.value)} placeholder="50" />
                 <span className="text-sm text-neutral-500">%</span>
               </div>
-              <p className="text-xs text-neutral-400 mt-1.5">${Number((session.mandate?.budget_per_window ?? '0')) * Number(spawnShare) / 100} of ${session.mandate?.budget_per_window} per window, and the same share of its lifetime cap.</p>
+              <p className="text-xs text-neutral-400 mt-1.5">{money((Number(session.mandate?.budget_per_window ?? 0) * Number(spawnShare)) / 100)} of {money(session.mandate?.budget_per_window)} per window, and the same share of its lifetime cap.</p>
             </div>
           </div>
           <DialogFooter className="flex justify-end gap-2">
@@ -234,7 +201,7 @@ export function OverviewSection(props: SectionProps) {
             <DialogDescription>Agents under this tree draw from what is left. Take everything out and their next purchase is refused for vault balance.</DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
-            <p className="text-sm text-neutral-600">In the vault for <Mono>{contractShort}</Mono>: <b>${session.vaultBalance ?? data.vault_available ?? '0.00'}</b></p>
+            <p className="text-sm text-neutral-600">In the vault for <Mono>{contractShort}</Mono>: <b>{money(session.vaultBalance ?? data.vault_available)}</b></p>
             <div>
               <label className="text-xs font-medium text-neutral-700 mb-1.5 block">Amount</label>
               <div className="flex items-center gap-2">
@@ -303,7 +270,7 @@ export function OverviewSection(props: SectionProps) {
           {refusals.length > 0 ? (
             refusals.slice(0, 5).map((r, i) => (
               <div key={i} className="flex items-center gap-2 rounded-lg border border-neutral-100 px-3 py-2 text-sm">
-                <span className="font-mono font-semibold">${r.amount}</span>
+<span className="font-mono font-semibold">{money(r.amount)}</span>
                 <span className="text-xs px-2 py-0.5 rounded-full bg-red-50 text-red-700">{r.bound}</span>
                 <span className="ml-auto text-xs text-neutral-500">{r.status ?? 'standing'}</span>
               </div>
@@ -319,10 +286,10 @@ export function OverviewSection(props: SectionProps) {
         <h2 className="text-base font-semibold text-neutral-900">Mandate terms</h2>
         <p className="text-xs text-neutral-400 mt-0.5 mb-4">Signed once · cannot be edited</p>
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-8 gap-y-3">
-          {termRow('Budget per window', `$${session.mandate.budget_per_window}`)}
+          {termRow('Budget per window', money(session.mandate.budget_per_window))}
           {termRow('Window', `${Math.round(session.mandate.window_seconds / 3600)} hours`)}
-          {termRow('Lifetime cap', `$${session.mandate.lifetime_cap}`)}
-          {termRow('Per purchase', `$${session.mandate.per_purchase_cap}`)}
+          {termRow('Lifetime cap', money(session.mandate.lifetime_cap))}
+          {termRow('Per purchase', money(session.mandate.per_purchase_cap))}
           {termRow('Per seller', `${session.mandate.per_seller_pct / 100}%`)}
           {termRow('Max depth', String(session.mandate.max_depth))}
           {termRow('Operator', shortAddress(session.mandate.operator_address))}
