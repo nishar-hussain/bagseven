@@ -559,8 +559,13 @@ export function AgentsSection(props: SectionProps) {
   const agentCell = (a: Agent) => (
     <div className="flex items-center gap-2">
       <span className="font-mono text-neutral-400">{'· '.repeat(a.depth)}</span>
-      <span className="font-semibold">{shortAddress(a.operator_address)}</span>
-      <span className="text-xs text-neutral-400">{a.depth === 0 ? 'Root' : `Depth ${a.depth}`}</span>
+      <div className="flex flex-col">
+        <div className="flex items-center gap-2">
+          <span className="font-semibold">{shortAddress(a.operator_address)}</span>
+          <span className="text-xs text-neutral-400">{a.depth === 0 ? 'Root' : `Depth ${a.depth}`}</span>
+        </div>
+        <span className="text-[11px] text-neutral-400 font-mono">node {a.id.slice(0, 8)}…</span>
+      </div>
     </div>
   );
   const windowCap = (a: Agent) => (budget * Number(a.share_percent)) / 100;
