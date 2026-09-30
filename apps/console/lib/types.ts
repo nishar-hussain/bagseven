@@ -27,6 +27,7 @@ export interface Session {
   mandate?: MandateSession;
   tree?: AgentRow[];
   vaultBalance?: string;
+  names?: Record<string, string>;
 }
 
 export const EMPTY_SESSION: Session = {};

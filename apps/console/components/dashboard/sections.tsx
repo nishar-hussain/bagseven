@@ -511,6 +511,10 @@ export function AgentsSection(props: SectionProps) {
   const [spawnShare, setSpawnShare] = useState('50');
   const [selected, setSelected] = useState<Agent | null>(null);
   const [moreOpen, setMoreOpen] = useState(false);
+  const [nameOpen, setNameOpen] = useState(false);
+  const [nameLabel, setNameLabel] = useState('');
+  const [nameDomain, setNameDomain] = useState('probe.mira.eth');
+  const [nameMcp, setNameMcp] = useState('');
 
   const statusOf = (s: string) => (s === 'active' ? 'live' : s === 'suspended' ? 'held' : 'revoked');
 
@@ -546,6 +550,16 @@ export function AgentsSection(props: SectionProps) {
   const spawnUnder = (a: Agent) => {
     setSpawnParent(a.id);
     setSpawnOpen(true);
+  };
+
+  const bindName = () => {
+    if (!selected) return;
+    const label = nameLabel.trim();
+    if (!label) { toast('error', 'Enter a label'); return; }
+    persist({ ...session, names: { ...(session.names ?? {}), [selected.id]: `${label}.${nameDomain}` } });
+    setNameOpen(false);
+    setNameLabel('');
+    toast('ok', `Bound ${label}.${nameDomain} to the agent`);
   };
 
   const budget = Number(session.mandate?.budget_per_window ?? 0);
@@ -667,7 +681,7 @@ export function AgentsSection(props: SectionProps) {
 
             <div className={card}>
               <div className="grid gap-3 text-sm">
-                <div><div className="text-xs text-neutral-400">Name</div><div className="mt-0.5">Unnamed — a name is bound from the console, not by the contract</div></div>
+                <div><div className="text-xs text-neutral-400">Name</div><div className="mt-0.5">{session.names?.[selected.id] ?? 'Unnamed — a name is bound from the console, not by the contract'}</div></div>
                 <div><div className="text-xs text-neutral-400">Purpose</div><div className="mt-0.5">None stated</div></div>
                 <div><div className="text-xs text-neutral-400">This window</div><div className="mt-0.5 font-mono">{money(0)} of {money(windowCap(selected))} · 0%</div></div>
                 <div><div className="text-xs text-neutral-400">Lifetime</div><div className="mt-0.5 font-mono">{money(0)} of {money(lifetimeCap(selected))}</div></div>
@@ -690,11 +704,11 @@ export function AgentsSection(props: SectionProps) {
                   <div className="absolute left-0 right-0 mt-1 rounded-xl border border-neutral-200 bg-white shadow-lg py-1 z-20">
                     {([
                       ['Send gas to the operator', 'Gas grants are not available on the local chain yet.'],
-                      ['Name this agent', 'Names come later — bound from the console, not the contract.'],
+                      ['Name this agent', ''], // opens the naming modal
                       ['Withdraw from the vault', 'Use Overview → Withdraw for the vault.'],
                       ['Revoke this branch', 'Revoke is an owner action on-chain — coming soon.'],
                     ] as [string, string][]).map(([label, hint]) => (
-                      <button key={label} onClick={() => { setMoreOpen(false); toast('info', hint); }} className="w-full text-left px-3.5 py-2 text-xs text-neutral-600 hover:bg-neutral-50">{label}</button>
+                      <button key={label} onClick={() => { setMoreOpen(false); if (label === 'Name this agent') setNameOpen(true); else toast('info', hint); }} className="w-full text-left px-3.5 py-2 text-xs text-neutral-600 hover:bg-neutral-50">{label}</button>
                     ))}
                   </div>
                 )}
@@ -728,6 +742,34 @@ export function AgentsSection(props: SectionProps) {
           <DialogFooter className="flex justify-end gap-2">
             <button onClick={() => setSpawnOpen(false)} className={btnGhost}>Cancel</button>
             <button onClick={spawn} disabled={busy !== null || !spawnOperator.trim()} className={btn}>Spawn agent</button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Name the agent modal */}
+      <Dialog open={nameOpen} onOpenChange={setNameOpen}>
+        <DialogContent className="bg-white">
+          <DialogHeader>
+            <DialogTitle>Name the agent</DialogTitle>
+            <DialogDescription>An ENSv2 subname bound to this mandate. A seller that resolves it reads what the contract allows right now, never a figure copied into a record.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <label className="text-xs font-medium text-neutral-700 mb-1.5 block">Label</label>
+              <input className={input} value={nameLabel} onChange={(e) => setNameLabel(e.target.value)} placeholder="worker2" />
+            </div>
+            <div>
+              <label className="text-xs font-medium text-neutral-700 mb-1.5 block">Under which name</label>
+              <input className={input} value={nameDomain} onChange={(e) => setNameDomain(e.target.value)} placeholder="probe.mira.eth" />
+            </div>
+            <div>
+              <label className="text-xs font-medium text-neutral-700 mb-1.5 block">MCP endpoint</label>
+              <input className={input} value={nameMcp} onChange={(e) => setNameMcp(e.target.value)} placeholder="https://…" />
+            </div>
+          </div>
+          <DialogFooter className="flex justify-end gap-2">
+            <button onClick={() => setNameOpen(false)} className={btnGhost}>Cancel</button>
+            <button onClick={bindName} disabled={!nameLabel.trim()} className={btn}>Issue and bind</button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
