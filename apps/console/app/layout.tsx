@@ -4,8 +4,8 @@ import { Toaster } from '../components/ui/sonner';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'Cordon console',
-  description: 'Cordon console — policy, mandates, and guardrails for autonomous AI agents',
+  title: 'Bagseven',
+  description: 'Bagseven — bounded spending control for autonomous AI agents. Connect your wallet, sign a mandate once, and every agent spend is enforced on-chain.',
   icons: {
     icon: '/icon.svg',
   },

@@ -57,7 +57,7 @@ const subsystems = [
   {
     icon: Wallet,
     title: 'Policy & Treasury',
-    tag: 'Cordon',
+    tag: 'Bagseven',
     desc: 'Deterministic spending limits and a custody layer the agent can never bypass. The planner proposes; policy and treasury dispose.',
   },
   {
