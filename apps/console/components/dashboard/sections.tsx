@@ -500,70 +500,171 @@ export function MandateSection(props: SectionProps) {
 
 export function AgentsSection(props: SectionProps) {
   const { session, client, busy, persist, run, toast } = props;
-  const [parentId, setParentId] = useState('');
-  const [operator, setOperator] = useState('');
-  const [share, setShare] = useState('50');
+  type Agent = { id: string; operator_address: string; share_percent: string; depth: number; status: string };
+  const [tree, setTree] = useState<Agent[]>([]);
+  const [search, setSearch] = useState('');
+  const [filter, setFilter] = useState<'all' | 'live' | 'held' | 'revoked'>('all');
+  const [view, setView] = useState<'list' | 'tree'>('list');
+  const [spawnOpen, setSpawnOpen] = useState(false);
+  const [spawnOperator, setSpawnOperator] = useState('');
+  const [spawnShare, setSpawnShare] = useState('50');
+
+  const statusOf = (s: string) => (s === 'active' ? 'live' : s === 'suspended' ? 'held' : 'revoked');
 
   const load = () =>
     run('load agents', async () => {
       if (!session.mandate) throw new Error('sign a mandate first');
       const overview = await client.mandateOverview(session.mandate.mandate_id);
-      const tree = (overview.agents as Session['tree']) ?? [];
-      persist({ ...session, tree });
-      if (!parentId && tree[0]) setParentId(tree[0].id);
+      const agents = overview.agents as Agent[] ?? [];
+      setTree(agents);
+      persist({ ...session, tree: agents });
     });
+
+  useEffect(() => {
+    if (session.mandate) load();
+  }, [session.mandate?.mandate_id]);
 
   const spawn = () =>
     run('spawn agent', async () => {
       if (!session.mandate) throw new Error('sign a mandate first');
       if (!session.ownerAddress) throw new Error('connect your wallet first');
-      const parent = parentId || session.mandate.root_agent_id;
-      const canonical = spawnCanonical({ mandateId: session.mandate.mandate_id, parentAgentId: parent, operator, sharePercent: Number(share) });
+      if (!spawnOperator.trim()) throw new Error('enter an operator address');
+      const parent = session.mandate.root_agent_id;
+      const canonical = spawnCanonical({ mandateId: session.mandate.mandate_id, parentAgentId: parent, operator: spawnOperator, sharePercent: Number(spawnShare) });
       const signature = await signMessage(canonical);
-      const child = await client.spawnAgent(session.mandate.mandate_id, { parent_agent_id: parent, operator_address: operator, share_percent: Number(share), chain_id: CHAIN_ID, signature });
-      toast('ok', `Spawned agent at depth ${child.depth} (${share}%)`);
+      await client.spawnAgent(session.mandate.mandate_id, { parent_agent_id: parent, operator_address: spawnOperator, share_percent: Number(spawnShare), chain_id: CHAIN_ID, signature });
+      setSpawnOpen(false);
+      setSpawnOperator('');
+      toast('ok', `Spawned agent at ${spawnShare}%`);
       await load();
     });
 
+  const budget = Number(session.mandate?.budget_per_window ?? 0);
+  const lifetime = Number(session.mandate?.lifetime_cap ?? 0);
+  const money = (v: unknown) => (Number.isFinite(Number(v)) ? Number(v).toFixed(2) : '0.00');
+
+  const filtered = (tree ?? []).filter((a) => {
+    const matchFilter = filter === 'all' || statusOf(a.status) === filter;
+    const q = search.trim().toLowerCase();
+    const matchSearch = !q || a.operator_address.toLowerCase().includes(q);
+    return matchFilter && matchSearch;
+  });
+  const counts = {
+    all: (tree ?? []).length,
+    live: (tree ?? []).filter((a) => statusOf(a.status) === 'live').length,
+    held: (tree ?? []).filter((a) => statusOf(a.status) === 'held').length,
+    revoked: (tree ?? []).filter((a) => statusOf(a.status) === 'revoked').length,
+  };
+
+  const agentCell = (a: Agent) => (
+    <div className="flex items-center gap-2">
+      <span className="font-mono text-neutral-400">{'· '.repeat(a.depth)}</span>
+      <span className="font-semibold">{shortAddress(a.operator_address)}</span>
+      <span className="text-xs text-neutral-400">{a.depth === 0 ? 'Root' : `Depth ${a.depth}`}</span>
+    </div>
+  );
+  const windowCap = (a: Agent) => (budget * Number(a.share_percent)) / 100;
+  const lifetimeCap = (a: Agent) => (lifetime * Number(a.share_percent)) / 100;
+
   return (
     <div className="space-y-4">
-      <div>
-        <h1 className="text-[28px] font-bold text-neutral-900 tracking-tight leading-tight">Agents</h1>
-        <p className="text-[13px] text-neutral-500 mt-1">A child can only ever be narrower than its parent.</p>
-      </div>
-      <div className={card}>
-        <div className="flex items-center justify-between">
-          <h2 className="text-base font-semibold text-neutral-900">Agent tree</h2>
-          <button onClick={load} disabled={busy !== null} className={btnGhost}>{busy ? '…' : 'Load'}</button>
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <h1 className="text-[24px] font-bold text-neutral-900 tracking-tight leading-tight">Agents</h1>
+          <p className="text-[13px] text-neutral-500 mt-1">Every agent under this mandate. Each purchase is charged to the agent and every agent above it.</p>
         </div>
-        <div className="mt-3 space-y-1.5">
-          {(session.tree ?? []).map((a) => (
-            <div key={a.id} className="flex items-center gap-2 rounded-lg border border-neutral-100 px-3 py-2 text-sm">
-              <span className="font-mono text-neutral-400">{'· '.repeat(a.depth)}</span>
-              <span className="font-medium">{shortAddress(a.operator_address)}</span>
-              <span className="text-xs text-neutral-500">{Number(a.share_percent)}% · depth {a.depth}</span>
-              <span className={`ml-auto text-xs ${a.status === 'active' ? 'text-green-600' : 'text-amber-600'}`}>{a.status}</span>
-            </div>
-          ))}
-          {(session.tree ?? []).length === 0 && <p className="text-sm text-neutral-500">No agents yet.</p>}
-        </div>
+        <button onClick={() => setSpawnOpen(true)} className={btn}>Spawn agent</button>
       </div>
 
       <div className={card}>
-        <h2 className="text-base font-semibold text-neutral-900 mb-4">Spawn an agent</h2>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <div>
-            <label className="text-xs font-medium text-neutral-700 mb-1.5 block">Parent</label>
-            <select className={`${input} appearance-none cursor-pointer`} value={parentId || session.mandate?.root_agent_id || ''} onChange={(e) => setParentId(e.target.value)}>
-              {(session.tree ?? []).map((a) => <option key={a.id} value={a.id}>{'·'.repeat(a.depth)} {shortAddress(a.operator_address)}</option>)}
-              <option value={session.mandate?.root_agent_id}>root</option>
-            </select>
+        {/* Toolbar */}
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="relative flex-1 min-w-[220px]">
+            <input className={`${input} pl-8`} value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search by purpose, node or operator" />
+            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400 text-sm">⌕</span>
           </div>
-          <div><label className="text-xs font-medium text-neutral-700 mb-1.5 block">Operator address</label><input className={input} value={operator} onChange={(e) => setOperator(e.target.value)} placeholder="0x…" /></div>
-          <div><label className="text-xs font-medium text-neutral-700 mb-1.5 block">Share of parent (%)</label><input className={input} value={share} onChange={(e) => setShare(e.target.value)} /></div>
+          <div className="flex items-center gap-1.5 text-xs">
+            {(['all', 'live', 'held', 'revoked'] as const).map((f) => (
+              <button key={f} onClick={() => setFilter(f)} className={`px-3 py-1 rounded-full ${filter === f ? 'bg-neutral-900 text-white' : 'bg-neutral-100 text-neutral-600'}`}>
+                {f} <span className="opacity-70">{counts[f]}</span>
+              </button>
+            ))}
+          </div>
+          <div className="flex items-center gap-1 rounded-full bg-neutral-100 p-0.5 text-xs">
+            {(['list', 'tree'] as const).map((v) => (
+              <button key={v} onClick={() => setView(v)} className={`px-3 py-1 rounded-full ${view === v ? 'bg-white shadow-sm font-medium' : 'text-neutral-500'}`}>{v.charAt(0).toUpperCase() + v.slice(1)}</button>
+            ))}
+          </div>
         </div>
-        <button onClick={spawn} disabled={busy !== null || !operator} className={`${btn} mt-4`}>{busy === 'spawn agent' ? 'Spawning…' : 'Spawn'}</button>
+
+        {/* List table */}
+        {view === 'list' ? (
+          <div className="mt-4 overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-xs text-neutral-400 border-b border-neutral-100">
+                  <th className="pb-2 font-medium">Agent</th>
+                  <th className="pb-2 font-medium">Can draw now</th>
+                  <th className="pb-2 font-medium">This window</th>
+                  <th className="pb-2 font-medium">Lifetime</th>
+                  <th className="pb-2 font-medium">Operator</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((a) => (
+                  <tr key={a.id} className="border-b border-neutral-50 last:border-0">
+                    <td className="py-2.5">{agentCell(a)}</td>
+                    <td className="py-2.5 font-mono">${money(0)}</td>
+                    <td className="py-2.5 font-mono">${money(0)} of ${money(windowCap(a))}</td>
+                    <td className="py-2.5 font-mono">${money(0)} / ${money(lifetimeCap(a))}</td>
+                    <td className="py-2.5 font-mono text-neutral-500">{a.operator_address.slice(0, 10)}…{a.operator_address.slice(-4)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {filtered.length === 0 && <p className="py-8 text-center text-sm text-neutral-500">No agents{filter !== 'all' ? ` (${filter})` : ''}.</p>}
+          </div>
+        ) : (
+          <div className="mt-4 space-y-1.5">
+            {filtered.map((a) => (
+              <div key={a.id} className="flex items-center gap-3 rounded-lg border border-neutral-100 px-3 py-2 text-sm">
+                {agentCell(a)}
+                <span className={`ml-auto text-xs ${a.status === 'active' ? 'text-green-600' : a.status === 'suspended' ? 'text-amber-600' : 'text-neutral-400'}`}>{statusOf(a.status)}</span>
+                <span className="text-xs font-mono text-neutral-500">${money(windowCap(a))}/window</span>
+              </div>
+            ))}
+            {filtered.length === 0 && <p className="py-8 text-center text-sm text-neutral-500">No agents.</p>}
+          </div>
+        )}
       </div>
+
+      {/* Spawn agent modal */}
+      <Dialog open={spawnOpen} onOpenChange={setSpawnOpen}>
+        <DialogContent className="bg-white">
+          <DialogHeader>
+            <DialogTitle>Spawn an agent</DialogTitle>
+            <DialogDescription>A child mandate under the root. It can only ever be narrower than its parent, and the contract refuses a wider one whoever asks.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <label className="text-xs font-medium text-neutral-700 mb-1.5 block">Operator address</label>
+              <input className={input} value={spawnOperator} onChange={(e) => setSpawnOperator(e.target.value)} placeholder="0x…" />
+            </div>
+            <div>
+              <label className="text-xs font-medium text-neutral-700 mb-1.5 block">Share of the parent</label>
+              <div className="flex items-center gap-2">
+                <input className={`${input} flex-1`} value={spawnShare} onChange={(e) => setSpawnShare(e.target.value)} placeholder="50" />
+                <span className="text-sm text-neutral-500">%</span>
+              </div>
+              <p className="text-xs text-neutral-400 mt-1.5">{money((budget * Number(spawnShare)) / 100)} of {money(budget)} per window, and the same share of its lifetime cap.</p>
+            </div>
+          </div>
+          <DialogFooter className="flex justify-end gap-2">
+            <button onClick={() => setSpawnOpen(false)} className={btnGhost}>Cancel</button>
+            <button onClick={spawn} disabled={busy !== null || !spawnOperator.trim()} className={btn}>Spawn agent</button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -618,7 +719,7 @@ export function ResolveSection(props: SectionProps) {
 
   const resolve = () =>
     run('resolve', async () => {
-      if (!ref.trim()) throw new Error('enter an agent id or operator address');
+      if (!ref.trim()) throw new Error('enter a name or an address');
       const res = await client.resolveAgent(ref.trim());
       setR(res as unknown as { agent: { operator_address: string; share_percent: string; depth: number }; remaining: { can_draw: string; remaining_window: string; remaining_lifetime: string; vault_available: string }; mandate: { id: string; per_purchase_cap: string; per_seller_pct: number; max_depth: number } });
       toast('ok', 'Resolved');
@@ -627,19 +728,19 @@ export function ResolveSection(props: SectionProps) {
   return (
     <div className="space-y-4">
       <div>
-        <h1 className="text-[28px] font-bold text-neutral-900 tracking-tight leading-tight">Resolve</h1>
-        <p className="text-[13px] text-neutral-500 mt-1">Look up an agent and read exactly what it may still spend.</p>
+        <h1 className="text-[24px] font-bold text-neutral-900 tracking-tight leading-tight">Resolve an agent</h1>
+        <p className="text-[13px] text-neutral-500 mt-1 max-w-xl leading-relaxed">A name, or the address in a payment. The name says which contract to ask; the contract says what the agent may still spend. On Ethereum Sepolia, where ENSv2 lives.</p>
       </div>
       <div className={card}>
         <div className="flex items-center gap-2">
-          <input className={input} value={ref} onChange={(e) => setRef(e.target.value)} placeholder="agent id or 0x operator address" />
-          <button onClick={resolve} disabled={busy !== null} className={btn}>Lookup</button>
+          <input className={input} value={ref} onChange={(e) => setRef(e.target.value)} placeholder="sentinel.mira.eth" onKeyDown={(e) => e.key === 'Enter' && resolve()} />
+          <button onClick={resolve} disabled={busy !== null} className={btn}>Look it up</button>
         </div>
         {r && (
           <div className="mt-5 space-y-4">
             <div className="flex items-center gap-2">
               <span className="text-sm font-medium">{shortAddress(r.agent.operator_address)}</span>
-              <span className="text-xs text-neutral-500">{Number(r.agent.share_percent)}% · depth {r.agent.depth}</span>
+              <span className="text-xs text-neutral-500">{Number(r.agent.share_percent)}% · {r.agent.depth === 0 ? 'Root' : `Depth ${r.agent.depth}`}</span>
             </div>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
               {[
