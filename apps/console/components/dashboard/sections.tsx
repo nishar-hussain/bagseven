@@ -7,6 +7,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import {
   CHAIN_ID,
   mandateCanonical,
+  sendNativeEth,
   shortAddress,
   signMessage,
   signSpendIntent,
@@ -511,6 +512,10 @@ export function AgentsSection(props: SectionProps) {
   const [spawnShare, setSpawnShare] = useState('50');
   const [selected, setSelected] = useState<Agent | null>(null);
   const [moreOpen, setMoreOpen] = useState(false);
+  const [gasOpen, setGasOpen] = useState(false);
+  const [gasAmt, setGasAmt] = useState('0.02');
+  const [withdrawOpen, setWithdrawOpen] = useState(false);
+  const [withdrawAmt, setWithdrawAmt] = useState('0');
   const [nameOpen, setNameOpen] = useState(false);
   const [nameLabel, setNameLabel] = useState('');
   const [nameDomain, setNameDomain] = useState('probe.mira.eth');
@@ -561,6 +566,28 @@ export function AgentsSection(props: SectionProps) {
     setNameLabel('');
     toast('ok', `Bound ${label}.${nameDomain} to the agent`);
   };
+
+  const sendGas = () =>
+    run('send gas', async () => {
+      if (!session.ownerAddress) throw new Error('connect your wallet first');
+      if (!selected) throw new Error('select an agent first');
+      const tx = await sendNativeEth(selected.operator_address, gasAmt);
+      setGasOpen(false);
+      toast('ok', `Sent ${gasAmt} ETH gas to the operator — ${tx.slice(0, 14)}…`);
+    });
+
+  const withdrawVault = () =>
+    run('withdraw', async () => {
+      if (!session.mandate) throw new Error('sign a mandate first');
+      if (!session.ownerAddress) throw new Error('connect your wallet first');
+      const canonical = withdrawCanonical({ mandateId: session.mandate.mandate_id, amount: withdrawAmt, to: session.ownerAddress });
+      const signature = await signMessage(canonical);
+      const res = await client.withdrawVault(session.mandate.mandate_id, { amount: withdrawAmt, to_address: session.ownerAddress, chain_id: CHAIN_ID, signature });
+      persist({ ...session, vaultBalance: res.vault_balance });
+      setWithdrawOpen(false);
+      toast('ok', `Withdrew $${withdrawAmt} — balance $${res.vault_balance}`);
+      await load();
+    });
 
   const budget = Number(session.mandate?.budget_per_window ?? 0);
   const lifetime = Number(session.mandate?.lifetime_cap ?? 0);
@@ -703,12 +730,12 @@ export function AgentsSection(props: SectionProps) {
                 {moreOpen && (
                   <div className="absolute left-0 right-0 mt-1 rounded-xl border border-neutral-200 bg-white shadow-lg py-1 z-20">
                     {([
-                      ['Send gas to the operator', 'Gas grants are not available on the local chain yet.'],
+                      ['Send gas to the operator', ''], // opens gas modal
                       ['Name this agent', ''], // opens the naming modal
-                      ['Withdraw from the vault', 'Use Overview → Withdraw for the vault.'],
+                      ['Withdraw from the vault', ''], // opens withdraw modal
                       ['Revoke this branch', 'Revoke is an owner action on-chain — coming soon.'],
                     ] as [string, string][]).map(([label, hint]) => (
-                      <button key={label} onClick={() => { setMoreOpen(false); if (label === 'Name this agent') setNameOpen(true); else toast('info', hint); }} className="w-full text-left px-3.5 py-2 text-xs text-neutral-600 hover:bg-neutral-50">{label}</button>
+                      <button key={label} onClick={() => { setMoreOpen(false); if (label === 'Send gas to the operator') setGasOpen(true); else if (label === 'Name this agent') setNameOpen(true); else if (label === 'Withdraw from the vault') setWithdrawOpen(true); else toast('info', hint); }} className="w-full text-left px-3.5 py-2 text-xs text-neutral-600 hover:bg-neutral-50">{label}</button>
                     ))}
                   </div>
                 )}
@@ -770,6 +797,54 @@ export function AgentsSection(props: SectionProps) {
           <DialogFooter className="flex justify-end gap-2">
             <button onClick={() => setNameOpen(false)} className={btnGhost}>Cancel</button>
             <button onClick={bindName} disabled={!nameLabel.trim()} className={btn}>Issue and bind</button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Send gas modal */}
+      <Dialog open={gasOpen} onOpenChange={setGasOpen}>
+        <DialogContent className="bg-white">
+          <DialogHeader>
+            <DialogTitle>Send gas to this operator</DialogTitle>
+            <DialogDescription>ETH from your own wallet, to the key that signs for this agent. It pays for the transaction that draws a tranche — never for a purchase, and the vault cannot send it.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <p className="text-sm text-neutral-600">Operator for this agent: <Mono>{selected ? shortAddress(selected.operator_address) : ''}</Mono></p>
+            <div>
+              <label className="text-xs font-medium text-neutral-700 mb-1.5 block">Amount</label>
+              <div className="flex items-center gap-2">
+                <input className={`${input} flex-1`} value={gasAmt} onChange={(e) => setGasAmt(e.target.value)} placeholder="0.02" />
+                <span className="text-sm text-neutral-500">ETH</span>
+              </div>
+            </div>
+          </div>
+          <DialogFooter className="flex justify-end gap-2">
+            <button onClick={() => setGasOpen(false)} className={btnGhost}>Cancel</button>
+            <button onClick={sendGas} disabled={busy !== null || !session.ownerAddress} className={btn}>Send {gasAmt} ETH</button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Withdraw from vault modal */}
+      <Dialog open={withdrawOpen} onOpenChange={setWithdrawOpen}>
+        <DialogContent className="bg-white">
+          <DialogHeader>
+            <DialogTitle>Withdraw from the vault</DialogTitle>
+            <DialogDescription>Agents under this tree draw from what is left. Take everything out and their next purchase is refused for vault balance.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <p className="text-sm text-neutral-600">In the vault for <Mono>{session.mandate?.contract_address ? `${session.mandate.contract_address.slice(0, 8)}…${session.mandate.contract_address.slice(-4)}` : ''}</Mono>: <b>{money(session.vaultBalance ?? '0')}</b> · TreeVault.treasury6(root)</p>
+            <div>
+              <label className="text-xs font-medium text-neutral-700 mb-1.5 block">Amount</label>
+              <div className="flex items-center gap-2">
+                <input className={`${input} flex-1`} value={withdrawAmt} onChange={(e) => setWithdrawAmt(e.target.value)} placeholder="0" />
+                <span className="text-sm text-neutral-500">USDC</span>
+              </div>
+            </div>
+          </div>
+          <DialogFooter className="flex justify-end gap-2">
+            <button onClick={() => setWithdrawOpen(false)} className={btnGhost}>Cancel</button>
+            <button onClick={withdrawVault} disabled={busy !== null || !session.ownerAddress} className={btn}>Withdraw ${withdrawAmt}</button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

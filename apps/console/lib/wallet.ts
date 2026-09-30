@@ -67,6 +67,15 @@ export async function signMessage(message: string): Promise<string> {
   return signature;
 }
 
+/** Send native ETH from the connected wallet to `to` via MetaMask. */
+export async function sendNativeEth(to: string, amountEth: string): Promise<string> {
+  const eth = window.ethereum;
+  if (!eth) throw new Error('No browser wallet found');
+  const from = await connectWallet();
+  const value = BigInt(Math.round(Number(amountEth) * 1e18));
+  return (await eth.request({ method: 'eth_sendTransaction', params: [{ from, to, value: `0x${value.toString(16)}` }] })) as string;
+}
+
 /**
  * The operator (which you set to the key you control — your creator wallet)
  * signs an EIP-712 spend intent through MetaMask. No browser-held key needed.
