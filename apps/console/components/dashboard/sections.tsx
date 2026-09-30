@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { Client } from '../../lib/client';
 import type { Session } from '../../lib/types';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '../ui/dialog';
 import {
   CHAIN_ID,
   mandateCanonical,
@@ -33,8 +34,13 @@ const btnGhost = 'px-5 py-2 rounded-full text-sm font-medium text-neutral-700 bo
 export function OverviewSection(props: SectionProps) {
   const { session, client, busy, persist, run, toast, onNavigate } = props;
   const [o, setO] = useState<Record<string, unknown> | null>(null);
-  const [fundAmt, setFundAmt] = useState('50');
-  const [withdrawAmt, setWithdrawAmt] = useState('10');
+  const [fundOpen, setFundOpen] = useState(false);
+  const [withdrawOpen, setWithdrawOpen] = useState(false);
+  const [spawnOpen, setSpawnOpen] = useState(false);
+  const [fundAmt, setFundAmt] = useState('1');
+  const [withdrawAmt, setWithdrawAmt] = useState('0');
+  const [spawnOperator, setSpawnOperator] = useState('');
+  const [spawnShare, setSpawnShare] = useState('50');
   const [spendAmt, setSpendAmt] = useState('0.50');
   const [recipient, setRecipient] = useState('');
   const [last, setLast] = useState<{ decision?: string; bound?: string; tx_hash?: string } | null>(null);
@@ -53,6 +59,7 @@ export function OverviewSection(props: SectionProps) {
       if (!session.mandate) throw new Error('sign a mandate first');
       const res = await client.fundVault(session.mandate.mandate_id, fundAmt);
       persist({ ...session, vaultBalance: res.vault_balance });
+      setFundOpen(false);
       toast('ok', `Vault funded — balance $${res.vault_balance}`);
       await load();
     });
@@ -65,6 +72,7 @@ export function OverviewSection(props: SectionProps) {
       const signature = await signMessage(canonical);
       const res = await client.withdrawVault(session.mandate.mandate_id, { amount: withdrawAmt, to_address: session.ownerAddress, chain_id: CHAIN_ID, signature });
       persist({ ...session, vaultBalance: res.vault_balance });
+      setWithdrawOpen(false);
       toast('ok', `Withdrew $${withdrawAmt} — balance $${res.vault_balance}`);
       await load();
     });
@@ -79,6 +87,21 @@ export function OverviewSection(props: SectionProps) {
       const res = await client.spendIntent({ agent_id: session.mandate.root_agent_id, amount: spendAmt, recipient: recipient.trim(), nonce, timestamp: nonce, chain_id: CHAIN_ID, signature });
       setLast(res);
       toast(res.decision === 'allow' ? 'ok' : 'info', res.decision === 'allow' ? `Executed on-chain ${res.tx_hash?.slice(0, 14)}…` : `Refused — ${res.bound}`);
+      await load();
+    });
+
+  const spawn = () =>
+    run('spawn agent', async () => {
+      if (!session.mandate) throw new Error('sign a mandate first');
+      if (!session.ownerAddress) throw new Error('connect your wallet first');
+      if (!spawnOperator.trim()) throw new Error('enter an operator address');
+      const parent = session.mandate.root_agent_id;
+      const canonical = spawnCanonical({ mandateId: session.mandate.mandate_id, parentAgentId: parent, operator: spawnOperator, sharePercent: Number(spawnShare) });
+      const signature = await signMessage(canonical);
+      await client.spawnAgent(session.mandate.mandate_id, { parent_agent_id: parent, operator_address: spawnOperator, share_percent: Number(spawnShare), chain_id: CHAIN_ID, signature });
+      setSpawnOpen(false);
+      setSpawnOperator('');
+      toast('ok', `Spawned agent at 50% — see it in Agents`);
       await load();
     });
 
@@ -142,8 +165,9 @@ export function OverviewSection(props: SectionProps) {
           <p className="text-[13px] text-neutral-500 mt-1">Signed once · cannot be edited.</p>
         </div>
         <div className="flex gap-2">
-          <button onClick={() => onNavigate?.('agents')} className={btnGhost}>Spawn agent</button>
-          <button onClick={load} disabled={busy !== null} className={btnGhost}>{busy ? '…' : 'Refresh'}</button>
+          <button onClick={() => setSpawnOpen(true)} className={btnGhost}>Spawn agent</button>
+          <button onClick={() => setWithdrawOpen(true)} className={btnGhost}>Withdraw</button>
+          <button onClick={() => setFundOpen(true)} className={btn}>Fund vault</button>
         </div>
       </div>
 
@@ -153,26 +177,6 @@ export function OverviewSection(props: SectionProps) {
         {stat('Spent in total', `$${data.spent_total ?? '0.00'} of $${data.lifetime_cap ?? '0'}`, 'The lifetime cap never refills')}
         {stat('Can be drawn now', `$${data.can_be_drawn_now ?? '0.00'}`, 'The tightest bound on the root, including the vault')}
         {stat('Agents', String(agents.length), `${live} live · ${revoked} revoked · ${levels} level${levels > 1 ? 's' : ''}`)}
-      </div>
-
-      {/* Vault: fund + withdraw */}
-      <div className={card}>
-        <div className="flex flex-wrap items-end justify-between gap-3">
-          <div>
-            <div className="text-xs text-neutral-400">Vault balance</div>
-            <div className="text-2xl font-bold text-neutral-900">${session.vaultBalance ?? data.vault_available ?? '0.00'}</div>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <div className="flex items-center gap-1.5">
-              <input className={`${input} !w-24`} value={fundAmt} onChange={(e) => setFundAmt(e.target.value)} placeholder="50" />
-              <button onClick={fund} disabled={busy !== null} className={btn}>Fund vault</button>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <input className={`${input} !w-24`} value={withdrawAmt} onChange={(e) => setWithdrawAmt(e.target.value)} placeholder="10" />
-              <button onClick={withdraw} disabled={busy !== null} className={btnGhost}>Withdraw</button>
-            </div>
-          </div>
-        </div>
       </div>
 
       {/* Spend intent */}
@@ -193,6 +197,81 @@ export function OverviewSection(props: SectionProps) {
           </div>
         )}
       </div>
+
+      {/* Spawn agent modal */}
+      <Dialog open={spawnOpen} onOpenChange={setSpawnOpen}>
+        <DialogContent className="bg-white">
+          <DialogHeader>
+            <DialogTitle>Spawn an agent</DialogTitle>
+            <DialogDescription>A child mandate under the root. It can only ever be narrower than its parent, and the contract refuses a wider one whoever asks.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <label className="text-xs font-medium text-neutral-700 mb-1.5 block">Operator address</label>
+              <input className={input} value={spawnOperator} onChange={(e) => setSpawnOperator(e.target.value)} placeholder="0x…" />
+            </div>
+            <div>
+              <label className="text-xs font-medium text-neutral-700 mb-1.5 block">Share of the parent</label>
+              <div className="flex items-center gap-2">
+                <input className={`${input} flex-1`} value={spawnShare} onChange={(e) => setSpawnShare(e.target.value)} placeholder="50" />
+                <span className="text-sm text-neutral-500">%</span>
+              </div>
+              <p className="text-xs text-neutral-400 mt-1.5">${Number((session.mandate?.budget_per_window ?? '0')) * Number(spawnShare) / 100} of ${session.mandate?.budget_per_window} per window, and the same share of its lifetime cap.</p>
+            </div>
+          </div>
+          <DialogFooter className="flex justify-end gap-2">
+            <button onClick={() => setSpawnOpen(false)} className={btnGhost}>Cancel</button>
+            <button onClick={spawn} disabled={busy !== null || !spawnOperator.trim()} className={btn}>Spawn agent</button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Withdraw modal */}
+      <Dialog open={withdrawOpen} onOpenChange={setWithdrawOpen}>
+        <DialogContent className="bg-white">
+          <DialogHeader>
+            <DialogTitle>Withdraw from the vault</DialogTitle>
+            <DialogDescription>Agents under this tree draw from what is left. Take everything out and their next purchase is refused for vault balance.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <p className="text-sm text-neutral-600">In the vault for <Mono>{contractShort}</Mono>: <b>${session.vaultBalance ?? data.vault_available ?? '0.00'}</b></p>
+            <div>
+              <label className="text-xs font-medium text-neutral-700 mb-1.5 block">Amount</label>
+              <div className="flex items-center gap-2">
+                <input className={`${input} flex-1`} value={withdrawAmt} onChange={(e) => setWithdrawAmt(e.target.value)} placeholder="0" />
+                <span className="text-sm text-neutral-500">USDC</span>
+              </div>
+            </div>
+          </div>
+          <DialogFooter className="flex justify-end gap-2">
+            <button onClick={() => setWithdrawOpen(false)} className={btnGhost}>Cancel</button>
+            <button onClick={withdraw} disabled={busy !== null || !session.ownerAddress} className={btn}>Withdraw ${withdrawAmt}</button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Fund vault modal */}
+      <Dialog open={fundOpen} onOpenChange={setFundOpen}>
+        <DialogContent className="bg-white">
+          <DialogHeader>
+            <DialogTitle>Fund the vault</DialogTitle>
+            <DialogDescription>USDC moves from your wallet into the vault. Agents never hold it — the vault releases one purchase at a time, and only when every bound allows it.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <label className="text-xs font-medium text-neutral-700 mb-1.5 block">Amount</label>
+              <div className="flex items-center gap-2">
+                <input className={`${input} flex-1`} value={fundAmt} onChange={(e) => setFundAmt(e.target.value)} placeholder="1" />
+                <span className="text-sm text-neutral-500">USDC</span>
+              </div>
+            </div>
+          </div>
+          <DialogFooter className="flex justify-end gap-2">
+            <button onClick={() => setFundOpen(false)} className={btnGhost}>Cancel</button>
+            <button onClick={fund} disabled={busy !== null} className={btn}>Fund ${fundAmt}</button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Agents to watch */}
       <div className={card}>
@@ -254,7 +333,7 @@ export function OverviewSection(props: SectionProps) {
 }
 
 export function MandateSection(props: SectionProps) {
-  const { session, client, busy, persist, run, toast } = props;
+  const { session, client, busy, persist, run, toast, onNavigate } = props;
   const [budget, setBudget] = useState('20');
   const [windowH, setWindowH] = useState('24 hours');
   const [lifetime, setLifetime] = useState('100');
@@ -297,6 +376,7 @@ export function MandateSection(props: SectionProps) {
       });
       persist({ ...session, operatorAddress: effectiveOperator, mandate: { mandate_id: m.mandate_id, root_agent_id: m.root_agent_id, contract_address: m.contract_address, owner_address: session.ownerAddress, operator_address: effectiveOperator, budget_per_window: budget, window_seconds: windowSeconds, lifetime_cap: lifetime, per_purchase_cap: perPurchase, per_seller_pct: Math.round(Number(sellerPct) * 100), max_depth: Number(maxDepth) } });
       toast('ok', `Mandate signed by ${shortAddress(session.ownerAddress)} — immutable`);
+      onNavigate?.('overview');
     });
 
   const fund = () =>
