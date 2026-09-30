@@ -500,14 +500,17 @@ export function MandateSection(props: SectionProps) {
 
 export function AgentsSection(props: SectionProps) {
   const { session, client, busy, persist, run, toast } = props;
-  type Agent = { id: string; operator_address: string; share_percent: string; depth: number; status: string };
+  type Agent = { id: string; operator_address: string; share_percent: string; depth: number; status: string; parent_agent_id?: string | null };
   const [tree, setTree] = useState<Agent[]>([]);
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<'all' | 'live' | 'held' | 'revoked'>('all');
   const [view, setView] = useState<'list' | 'tree'>('list');
   const [spawnOpen, setSpawnOpen] = useState(false);
+  const [spawnParent, setSpawnParent] = useState('');
   const [spawnOperator, setSpawnOperator] = useState('');
   const [spawnShare, setSpawnShare] = useState('50');
+  const [selected, setSelected] = useState<Agent | null>(null);
+  const [moreOpen, setMoreOpen] = useState(false);
 
   const statusOf = (s: string) => (s === 'active' ? 'live' : s === 'suspended' ? 'held' : 'revoked');
 
@@ -515,7 +518,7 @@ export function AgentsSection(props: SectionProps) {
     run('load agents', async () => {
       if (!session.mandate) throw new Error('sign a mandate first');
       const overview = await client.mandateOverview(session.mandate.mandate_id);
-      const agents = overview.agents as Agent[] ?? [];
+      const agents = (overview.agents as Agent[] | undefined) ?? [];
       setTree(agents);
       persist({ ...session, tree: agents });
     });
@@ -529,15 +532,21 @@ export function AgentsSection(props: SectionProps) {
       if (!session.mandate) throw new Error('sign a mandate first');
       if (!session.ownerAddress) throw new Error('connect your wallet first');
       if (!spawnOperator.trim()) throw new Error('enter an operator address');
-      const parent = session.mandate.root_agent_id;
+      const parent = spawnParent || session.mandate.root_agent_id;
       const canonical = spawnCanonical({ mandateId: session.mandate.mandate_id, parentAgentId: parent, operator: spawnOperator, sharePercent: Number(spawnShare) });
       const signature = await signMessage(canonical);
       await client.spawnAgent(session.mandate.mandate_id, { parent_agent_id: parent, operator_address: spawnOperator, share_percent: Number(spawnShare), chain_id: CHAIN_ID, signature });
       setSpawnOpen(false);
+      setSpawnParent('');
       setSpawnOperator('');
       toast('ok', `Spawned agent at ${spawnShare}%`);
       await load();
     });
+
+  const spawnUnder = (a: Agent) => {
+    setSpawnParent(a.id);
+    setSpawnOpen(true);
+  };
 
   const budget = Number(session.mandate?.budget_per_window ?? 0);
   const lifetime = Number(session.mandate?.lifetime_cap ?? 0);
@@ -581,6 +590,8 @@ export function AgentsSection(props: SectionProps) {
         <button onClick={() => setSpawnOpen(true)} className={btn}>Spawn agent</button>
       </div>
 
+      <div className="flex items-start gap-5">
+        <div className="flex-1 min-w-0">
       <div className={card}>
         {/* Toolbar */}
         <div className="flex flex-wrap items-center justify-between gap-3">
@@ -617,7 +628,7 @@ export function AgentsSection(props: SectionProps) {
               </thead>
               <tbody>
                 {filtered.map((a) => (
-                  <tr key={a.id} className="border-b border-neutral-50 last:border-0">
+                  <tr key={a.id} onClick={() => setSelected(a)} className={`border-b border-neutral-50 last:border-0 cursor-pointer transition-colors ${selected?.id === a.id ? 'bg-neutral-50' : 'hover:bg-neutral-50/60'}`}>
                     <td className="py-2.5">{agentCell(a)}</td>
                     <td className="py-2.5 font-mono">${money(0)}</td>
                     <td className="py-2.5 font-mono">${money(0)} of ${money(windowCap(a))}</td>
@@ -632,13 +643,63 @@ export function AgentsSection(props: SectionProps) {
         ) : (
           <div className="mt-4 space-y-1.5">
             {filtered.map((a) => (
-              <div key={a.id} className="flex items-center gap-3 rounded-lg border border-neutral-100 px-3 py-2 text-sm">
+              <div key={a.id} onClick={() => setSelected(a)} className={`flex items-center gap-3 rounded-lg border border-neutral-100 px-3 py-2 text-sm cursor-pointer transition-colors ${selected?.id === a.id ? 'bg-neutral-50 border-neutral-200' : 'hover:bg-neutral-50/60'}`}>
                 {agentCell(a)}
                 <span className={`ml-auto text-xs ${a.status === 'active' ? 'text-green-600' : a.status === 'suspended' ? 'text-amber-600' : 'text-neutral-400'}`}>{statusOf(a.status)}</span>
                 <span className="text-xs font-mono text-neutral-500">${money(windowCap(a))}/window</span>
               </div>
             ))}
             {filtered.length === 0 && <p className="py-8 text-center text-sm text-neutral-500">No agents.</p>}
+          </div>
+        )}
+      </div>
+        </div>
+
+        {/* Detail panel */}
+        {selected && (
+          <div className="w-[340px] shrink-0 space-y-4">
+            <div className={card}>
+              <div className="text-xs text-neutral-400">Agent</div>
+              <div className="text-sm font-semibold mt-1 break-all">{selected.operator_address}</div>
+              <div className="text-3xl font-bold text-neutral-900 mt-3">${money(0)}</div>
+              <div className="text-xs text-neutral-400 mt-1">Left to draw. Its window allows more than the vault holds.</div>
+            </div>
+
+            <div className={card}>
+              <div className="grid gap-3 text-sm">
+                <div><div className="text-xs text-neutral-400">Name</div><div className="mt-0.5">Unnamed — a name is bound from the console, not by the contract</div></div>
+                <div><div className="text-xs text-neutral-400">Purpose</div><div className="mt-0.5">None stated</div></div>
+                <div><div className="text-xs text-neutral-400">This window</div><div className="mt-0.5 font-mono">{money(0)} of {money(windowCap(selected))} · 0%</div></div>
+                <div><div className="text-xs text-neutral-400">Lifetime</div><div className="mt-0.5 font-mono">{money(0)} of {money(lifetimeCap(selected))}</div></div>
+                <div className="flex justify-between"><span className="text-neutral-500">Per purchase</span><span className="font-semibold">{money(session.mandate?.per_purchase_cap)}</span></div>
+                <div className="flex justify-between"><span className="text-neutral-500">Per seller</span><span className="font-semibold">{(session.mandate?.per_seller_pct ?? 0) / 100}% of a window</span></div>
+                <div className="flex justify-between"><span className="text-neutral-500">Window length</span><span className="font-semibold">{Math.round((session.mandate?.window_seconds ?? 0) / 3600)} hours</span></div>
+                <div className="flex justify-between"><span className="text-neutral-500">Depth</span><span className="font-semibold">{selected.depth} of {session.mandate?.max_depth}</span></div>
+                <div><div className="text-xs text-neutral-400">Operator</div><div className="mt-0.5 font-mono break-all">{selected.operator_address}</div></div>
+                <div className="flex justify-between"><span className="text-neutral-500">Parent</span><span className="font-semibold">{selected.parent_agent_id ? shortAddress(selected.parent_agent_id) : 'None — root'}</span></div>
+                <div className="flex justify-between"><span className="text-neutral-500">Children</span><span className="font-semibold">{(() => { const c = (tree ?? []).filter((x) => x.parent_agent_id === selected.id).length; return c === 0 ? 'None' : c; })()}</span></div>
+                <div><div className="text-xs text-neutral-400">Node id</div><div className="mt-0.5 font-mono text-xs break-all">{selected.id}</div></div>
+              </div>
+            </div>
+
+            <div className={card}>
+              <button onClick={() => spawnUnder(selected)} className={`${btn} w-full`}>＋ Spawn under this agent</button>
+              <div className="relative mt-2">
+                <button onClick={() => setMoreOpen(!moreOpen)} className={`${btnGhost} w-full`}>More ▾</button>
+                {moreOpen && (
+                  <div className="absolute left-0 right-0 mt-1 rounded-xl border border-neutral-200 bg-white shadow-lg py-1 z-20">
+                    {([
+                      ['Send gas to the operator', 'Gas grants are not available on the local chain yet.'],
+                      ['Name this agent', 'Names come later — bound from the console, not the contract.'],
+                      ['Withdraw from the vault', 'Use Overview → Withdraw for the vault.'],
+                      ['Revoke this branch', 'Revoke is an owner action on-chain — coming soon.'],
+                    ] as [string, string][]).map(([label, hint]) => (
+                      <button key={label} onClick={() => { setMoreOpen(false); toast('info', hint); }} className="w-full text-left px-3.5 py-2 text-xs text-neutral-600 hover:bg-neutral-50">{label}</button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
         )}
       </div>

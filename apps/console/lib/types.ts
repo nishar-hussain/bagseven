@@ -18,6 +18,7 @@ export interface AgentRow {
   share_percent: string;
   depth: number;
   status: string;
+  parent_agent_id?: string | null;
 }
 
 export interface Session {

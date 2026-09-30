@@ -219,7 +219,7 @@ export function buildPolicyRoutes(app: FastifyInstance, { db, redis, config }: S
       lifetime_cap: mandate.lifetimeCap,
       vault_available: fromUnits(vault),
       can_be_drawn_now: canDraw,
-      agents: tree.map((a) => ({ id: a.id, operator_address: a.operatorAddress, share_percent: a.sharePercent, depth: a.depth, status: a.status })),
+      agents: tree.map((a) => ({ id: a.id, operator_address: a.operatorAddress, share_percent: a.sharePercent, depth: a.depth, status: a.status, parent_agent_id: a.parentAgentId })),
       recent_refusals: recentRefusals,
       terms: {
         owner_address: mandate.ownerAddress,
