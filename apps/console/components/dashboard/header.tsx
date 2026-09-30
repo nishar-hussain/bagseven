@@ -11,6 +11,7 @@ interface HeaderProps {
   userWallet?: string;
   onConnectWallet?: () => Promise<void>;
   onDisconnectWallet?: () => void;
+  mandateExists?: boolean;
 }
 
 const nav: { id: Section; label: string }[] = [
@@ -21,8 +22,9 @@ const nav: { id: Section; label: string }[] = [
   { id: 'resolve', label: 'Resolve' },
 ];
 
-export function Header({ activeSection, onSectionChange, userWallet, onConnectWallet, onDisconnectWallet }: HeaderProps) {
+export function Header({ activeSection, onSectionChange, userWallet, onConnectWallet, onDisconnectWallet, mandateExists }: HeaderProps) {
   const [busy, setBusy] = useState(false);
+  const visibleNav = mandateExists ? nav.filter((n) => n.id !== 'mandate') : nav;
   const connect = async () => {
     setBusy(true);
     try { await onConnectWallet?.(); } catch { /* toast handled upstream */ } finally { setBusy(false); }
@@ -46,7 +48,7 @@ export function Header({ activeSection, onSectionChange, userWallet, onConnectWa
         </div>
 
         <nav className="flex items-center gap-5 sm:gap-6 text-[13px]">
-          {nav.map((item) => (
+          {visibleNav.map((item) => (
             <button
               key={item.id}
               onClick={() => onSectionChange(item.id)}

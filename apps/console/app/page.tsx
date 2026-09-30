@@ -100,7 +100,7 @@ const sectionProps = { session, client, busy, persist, run, toast, onNavigate: (
 
   return (
     <div className="min-h-screen bg-[#f5f6f8] text-[#111827] flex flex-col">
-      <Header activeSection={activeSection} onSectionChange={setActiveSection} userWallet={session.ownerAddress} onConnectWallet={onConnectWallet} onDisconnectWallet={onDisconnectWallet} />
+      <Header activeSection={activeSection} onSectionChange={setActiveSection} userWallet={session.ownerAddress} onConnectWallet={onConnectWallet} onDisconnectWallet={onDisconnectWallet} mandateExists={!!session.mandate} />
       <main className="flex-1 max-w-[1100px] w-full mx-auto px-6 sm:px-8 py-7">
         <div key={activeSection} className="animate-in fade-in duration-200">
           {activeSection === 'overview' && <OverviewSection {...sectionProps} />}

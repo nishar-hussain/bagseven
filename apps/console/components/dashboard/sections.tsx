@@ -31,8 +31,13 @@ const btn = 'px-5 py-2 rounded-full text-sm font-medium text-white bg-gradient-t
 const btnGhost = 'px-5 py-2 rounded-full text-sm font-medium text-neutral-700 border border-neutral-200/90 bg-white hover:bg-neutral-50 transition disabled:opacity-50 cursor-pointer';
 
 export function OverviewSection(props: SectionProps) {
-  const { session, client, persist, run, toast, onNavigate } = props;
+  const { session, client, busy, persist, run, toast, onNavigate } = props;
   const [o, setO] = useState<Record<string, unknown> | null>(null);
+  const [fundAmt, setFundAmt] = useState('50');
+  const [withdrawAmt, setWithdrawAmt] = useState('10');
+  const [spendAmt, setSpendAmt] = useState('0.50');
+  const [recipient, setRecipient] = useState('');
+  const [last, setLast] = useState<{ decision?: string; bound?: string; tx_hash?: string } | null>(null);
 
   const load = () =>
     run('load overview', async () => {
@@ -41,6 +46,40 @@ export function OverviewSection(props: SectionProps) {
       setO(overview);
       persist({ ...session, tree: (overview.agents as Session['tree']) ?? [], vaultBalance: overview.vault_available as string });
       toast('ok', 'Refreshed');
+    });
+
+  const fund = () =>
+    run('fund vault', async () => {
+      if (!session.mandate) throw new Error('sign a mandate first');
+      const res = await client.fundVault(session.mandate.mandate_id, fundAmt);
+      persist({ ...session, vaultBalance: res.vault_balance });
+      toast('ok', `Vault funded — balance $${res.vault_balance}`);
+      await load();
+    });
+
+  const withdraw = () =>
+    run('withdraw', async () => {
+      if (!session.mandate) throw new Error('sign a mandate first');
+      if (!session.ownerAddress) throw new Error('connect your wallet first');
+      const canonical = withdrawCanonical({ mandateId: session.mandate.mandate_id, amount: withdrawAmt, to: session.ownerAddress });
+      const signature = await signMessage(canonical);
+      const res = await client.withdrawVault(session.mandate.mandate_id, { amount: withdrawAmt, to_address: session.ownerAddress, chain_id: CHAIN_ID, signature });
+      persist({ ...session, vaultBalance: res.vault_balance });
+      toast('ok', `Withdrew $${withdrawAmt} — balance $${res.vault_balance}`);
+      await load();
+    });
+
+  const spend = () =>
+    run('spend intent', async () => {
+      if (!session.mandate) throw new Error('sign a mandate first');
+      if (!session.ownerAddress) throw new Error('connect your wallet first (it signs the spend)');
+      if (!recipient.trim()) throw new Error('enter a recipient address');
+      const nonce = Math.floor(Date.now() / 1000);
+      const signature = await signSpendIntent({ agentId: session.mandate.root_agent_id, amount: spendAmt, recipient: recipient.trim() as `0x${string}`, nonce, timestamp: nonce, chainId: CHAIN_ID }, session.ownerAddress);
+      const res = await client.spendIntent({ agent_id: session.mandate.root_agent_id, amount: spendAmt, recipient: recipient.trim(), nonce, timestamp: nonce, chain_id: CHAIN_ID, signature });
+      setLast(res);
+      toast(res.decision === 'allow' ? 'ok' : 'info', res.decision === 'allow' ? `Executed on-chain ${res.tx_hash?.slice(0, 14)}…` : `Refused — ${res.bound}`);
+      await load();
     });
 
   useEffect(() => {
@@ -104,8 +143,7 @@ export function OverviewSection(props: SectionProps) {
         </div>
         <div className="flex gap-2">
           <button onClick={() => onNavigate?.('agents')} className={btnGhost}>Spawn agent</button>
-          <button onClick={() => onNavigate?.('mandate')} className={btnGhost}>Withdraw</button>
-          <button onClick={() => onNavigate?.('mandate')} className={btn}>Fund vault</button>
+          <button onClick={load} disabled={busy !== null} className={btnGhost}>{busy ? '…' : 'Refresh'}</button>
         </div>
       </div>
 
@@ -115,6 +153,45 @@ export function OverviewSection(props: SectionProps) {
         {stat('Spent in total', `$${data.spent_total ?? '0.00'} of $${data.lifetime_cap ?? '0'}`, 'The lifetime cap never refills')}
         {stat('Can be drawn now', `$${data.can_be_drawn_now ?? '0.00'}`, 'The tightest bound on the root, including the vault')}
         {stat('Agents', String(agents.length), `${live} live · ${revoked} revoked · ${levels} level${levels > 1 ? 's' : ''}`)}
+      </div>
+
+      {/* Vault: fund + withdraw */}
+      <div className={card}>
+        <div className="flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <div className="text-xs text-neutral-400">Vault balance</div>
+            <div className="text-2xl font-bold text-neutral-900">${session.vaultBalance ?? data.vault_available ?? '0.00'}</div>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <div className="flex items-center gap-1.5">
+              <input className={`${input} !w-24`} value={fundAmt} onChange={(e) => setFundAmt(e.target.value)} placeholder="50" />
+              <button onClick={fund} disabled={busy !== null} className={btn}>Fund vault</button>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <input className={`${input} !w-24`} value={withdrawAmt} onChange={(e) => setWithdrawAmt(e.target.value)} placeholder="10" />
+              <button onClick={withdraw} disabled={busy !== null} className={btnGhost}>Withdraw</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Spend intent */}
+      <div className={card}>
+        <h2 className="text-base font-semibold text-neutral-900">Spend intent</h2>
+        <p className="text-xs text-neutral-400 mt-0.5 mb-3">Signed by the operator (your creator wallet, EIP-712). The contract enforces every bound.</p>
+        <div className="flex flex-wrap gap-2">
+          <input className={`${input} !w-28`} value={spendAmt} onChange={(e) => setSpendAmt(e.target.value)} placeholder="0.50" />
+          <input className={`${input} flex-1 min-w-[220px]`} value={recipient} onChange={(e) => setRecipient(e.target.value)} placeholder="0x recipient" />
+          <button onClick={spend} disabled={busy !== null || !session.ownerAddress} className={btn}>Run and pay ${spendAmt}</button>
+        </div>
+        {!session.ownerAddress && <p className="mt-2 text-xs text-amber-600">Connect your wallet to sign spends.</p>}
+        {last && (
+          <div className="mt-3 text-xs space-y-1">
+            <span className={`inline-flex px-2 py-0.5 rounded-full ${last.decision === 'allow' ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>{last.decision}</span>
+            {last.bound && <span className="ml-1 text-neutral-500">bound: {last.bound}</span>}
+            {last.tx_hash && <div className="font-mono text-neutral-500">{last.tx_hash.slice(0, 24)}…</div>}
+          </div>
+        )}
       </div>
 
       {/* Agents to watch */}
