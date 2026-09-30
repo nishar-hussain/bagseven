@@ -20,6 +20,7 @@ export interface SectionProps {
   persist: (s: Session) => void;
   run: (name: string, fn: () => Promise<void>) => Promise<void>;
   toast: (kind: 'ok' | 'error' | 'info', message: string) => void;
+  onNavigate?: (s: string) => void;
 }
 
 const Mono = ({ children }: { children: React.ReactNode }) => <span className="font-mono text-xs">{children}</span>;
@@ -30,7 +31,7 @@ const btn = 'px-5 py-2 rounded-full text-sm font-medium text-white bg-gradient-t
 const btnGhost = 'px-5 py-2 rounded-full text-sm font-medium text-neutral-700 border border-neutral-200/90 bg-white hover:bg-neutral-50 transition disabled:opacity-50 cursor-pointer';
 
 export function OverviewSection(props: SectionProps) {
-  const { session, client, busy, persist, run, toast } = props;
+  const { session, client, persist, run, toast, onNavigate } = props;
   const [o, setO] = useState<Record<string, unknown> | null>(null);
 
   const load = () =>
@@ -42,66 +43,135 @@ export function OverviewSection(props: SectionProps) {
       toast('ok', 'Refreshed');
     });
 
-  const ov = (o ?? {}) as { spent_this_window?: string; budget_per_window?: string; spent_total?: string; lifetime_cap?: string; vault_available?: string; can_be_drawn_now?: string };
-  return (
-    <div className="space-y-4">
-      <div>
+  useEffect(() => {
+    if (session.mandate) load();
+  }, [session.mandate?.mandate_id]);
+
+  if (!session.mandate) {
+    return (
+      <div className="space-y-4">
         <h1 className="text-[28px] font-bold text-neutral-900 tracking-tight leading-tight">Overview</h1>
-        <p className="text-[13px] text-neutral-500 mt-1">One budget, signed once, enforced on-chain.</p>
-      </div>
-
-      {session.mandate ? (
-        <>
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-            {[
-              ['Spent this window', `${ov.spent_this_window ?? '0.00'} of $${ov.budget_per_window ?? '0'}`],
-              ['Spent in total', `${ov.spent_total ?? '0.00'} of $${ov.lifetime_cap ?? '0'}`],
-              ['Vault available', `$${ov.vault_available ?? '0.00'}`],
-              ['Can be drawn now', `$${ov.can_be_drawn_now ?? '0.00'}`],
-            ].map(([label, value]) => (
-              <div key={label} className={`${card} !p-5`}>
-                <div className="text-xs text-neutral-400">{label}</div>
-                <div className="text-xl font-semibold text-neutral-900 mt-1.5">{value}</div>
-              </div>
-            ))}
-          </div>
-
-          <div className={card}>
-            <div className="flex items-center justify-between">
-              <h2 className="text-base font-semibold text-neutral-900">Agents</h2>
-              <button onClick={load} disabled={busy !== null} className={btnGhost}>{busy ? '…' : 'Refresh'}</button>
-            </div>
-            <div className="mt-3 space-y-1.5">
-              {(session.tree ?? []).map((a) => (
-                <div key={a.id} className="flex items-center gap-2 rounded-lg border border-neutral-100 px-3 py-2 text-sm">
-                  <span className="font-mono text-neutral-400">{'· '.repeat(a.depth)}</span>
-                  <span className="font-medium">{shortAddress(a.operator_address)}</span>
-                  <span className="text-xs text-neutral-500">{Number(a.share_percent)}% · depth {a.depth}</span>
-                  <span className={`ml-auto text-xs ${a.status === 'active' ? 'text-green-600' : 'text-amber-600'}`}>{a.status}</span>
-                </div>
-              ))}
-              {(session.tree ?? []).length === 0 && <p className="text-sm text-neutral-500">No agents yet — spawn one in Agents.</p>}
-            </div>
-          </div>
-
-          <div className={card}>
-            <h2 className="text-base font-semibold text-neutral-900 mb-3">Mandate terms</h2>
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-sm">
-              <div><div className="text-xs text-neutral-400">Budget / window</div><div className="font-semibold">${session.mandate.budget_per_window}</div></div>
-              <div><div className="text-xs text-neutral-400">Lifetime cap</div><div className="font-semibold">${session.mandate.lifetime_cap}</div></div>
-              <div><div className="text-xs text-neutral-400">Per purchase</div><div className="font-semibold">${session.mandate.per_purchase_cap}</div></div>
-              <div><div className="text-xs text-neutral-400">Per seller</div><div className="font-semibold">{session.mandate.per_seller_pct / 100}%</div></div>
-              <div><div className="text-xs text-neutral-400">Max depth</div><div className="font-semibold">{session.mandate.max_depth}</div></div>
-              <div><div className="text-xs text-neutral-400">Contract</div><Mono>{shortAddress(session.mandate.contract_address)}</Mono></div>
-            </div>
-          </div>
-        </>
-      ) : (
         <div className={`${card} flex flex-col items-center justify-center py-20 text-center`}>
           <p className="text-sm text-neutral-500">No mandate yet.</p>
           <p className="text-xs text-neutral-400 mt-1">Go to <b>Mandate</b> to sign your first one.</p>
         </div>
-      )}
+      </div>
+    );
+  }
+
+  const data = (o ?? {}) as {
+    spent_this_window?: string;
+    budget_per_window?: string;
+    spent_total?: string;
+    lifetime_cap?: string;
+    vault_available?: string;
+    can_be_drawn_now?: string;
+    agents?: Session['tree'];
+    recent_refusals?: Array<{ amount?: string; bound?: string; status?: string; requestedAt?: string }>;
+  };
+  const agents = data.agents ?? session.tree ?? [];
+  const live = agents.filter((a) => a.status === 'active').length;
+  const revoked = agents.filter((a) => a.status !== 'active').length;
+  const levels = Math.max(0, ...agents.map((a) => a.depth)) + 1;
+  const refusals = data.recent_refusals ?? [];
+  const contract = session.mandate.contract_address;
+  const contractShort = contract ? `${contract.slice(0, 8)}…${contract.slice(-4)}` : '';
+
+  const stat = (label: string, value: string, hint?: string) => (
+    <div className={card}>
+      <div className="text-xs text-neutral-400">{label}</div>
+      <div className="text-xl font-semibold text-neutral-900 mt-1.5">{value}</div>
+      {hint && <div className="text-[11px] text-neutral-400 mt-1">{hint}</div>}
+    </div>
+  );
+
+  const termRow = (label: string, value: string) => (
+    <div className="flex items-center justify-between text-sm">
+      <span className="text-neutral-500">{label}</span>
+      <span className="font-semibold text-neutral-900">{value}</span>
+    </div>
+  );
+
+  return (
+    <div className="space-y-5">
+      {/* Header + actions */}
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <h1 className="text-[22px] font-bold text-neutral-900 tracking-tight leading-tight">
+            Root mandate <Mono>{contractShort}</Mono> · <span className="text-green-600">live</span> · {agents.length} agent{agents.length === 1 ? '' : 's'}
+          </h1>
+          <p className="text-[13px] text-neutral-500 mt-1">Signed once · cannot be edited.</p>
+        </div>
+        <div className="flex gap-2">
+          <button onClick={() => onNavigate?.('agents')} className={btnGhost}>Spawn agent</button>
+          <button onClick={() => onNavigate?.('mandate')} className={btnGhost}>Withdraw</button>
+          <button onClick={() => onNavigate?.('mandate')} className={btn}>Fund vault</button>
+        </div>
+      </div>
+
+      {/* Stats */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        {stat('Spent this window', `$${data.spent_this_window ?? '0.00'} of $${data.budget_per_window ?? '0'}`, 'Across the whole tree · resets every 24 hours')}
+        {stat('Spent in total', `$${data.spent_total ?? '0.00'} of $${data.lifetime_cap ?? '0'}`, 'The lifetime cap never refills')}
+        {stat('Can be drawn now', `$${data.can_be_drawn_now ?? '0.00'}`, 'The tightest bound on the root, including the vault')}
+        {stat('Agents', String(agents.length), `${live} live · ${revoked} revoked · ${levels} level${levels > 1 ? 's' : ''}`)}
+      </div>
+
+      {/* Agents to watch */}
+      <div className={card}>
+        <div className="flex items-center justify-between">
+          <h2 className="text-base font-semibold text-neutral-900">Agents to watch</h2>
+          <button onClick={() => onNavigate?.('agents')} className="text-xs text-neutral-500 hover:text-neutral-900 cursor-pointer">All agents →</button>
+        </div>
+        <div className="mt-3 space-y-1.5">
+          {agents.map((a) => (
+            <div key={a.id} className="flex items-center gap-2 rounded-lg border border-neutral-100 px-3 py-2 text-sm">
+              <span className="font-mono text-neutral-400">{'· '.repeat(a.depth)}</span>
+              <span className="font-medium">{shortAddress(a.operator_address)}</span>
+              <span className="text-xs text-neutral-500">{a.depth === 0 ? 'Root' : `Depth ${a.depth}`}</span>
+              <span className="ml-auto text-xs text-neutral-500">{Number(a.share_percent)}% of window</span>
+              <span className="text-xs font-mono text-neutral-400">$0.00</span>
+            </div>
+          ))}
+          {agents.length === 0 && <p className="text-sm text-neutral-500">No agents yet — spawn one.</p>}
+        </div>
+      </div>
+
+      {/* Recent refusals */}
+      <div className={card}>
+        <div className="flex items-center justify-between">
+          <h2 className="text-base font-semibold text-neutral-900">Recent refusals</h2>
+          <button onClick={() => onNavigate?.('refusals')} className="text-xs text-neutral-500 hover:text-neutral-900 cursor-pointer">All refusals →</button>
+        </div>
+        <div className="mt-3 space-y-1.5">
+          {refusals.length > 0 ? (
+            refusals.slice(0, 5).map((r, i) => (
+              <div key={i} className="flex items-center gap-2 rounded-lg border border-neutral-100 px-3 py-2 text-sm">
+                <span className="font-mono font-semibold">${r.amount}</span>
+                <span className="text-xs px-2 py-0.5 rounded-full bg-red-50 text-red-700">{r.bound}</span>
+                <span className="ml-auto text-xs text-neutral-500">{r.status ?? 'standing'}</span>
+              </div>
+            ))
+          ) : (
+            <p className="text-sm text-neutral-500">Nothing has been refused. Every purchase so far fit every bound.</p>
+          )}
+        </div>
+      </div>
+
+      {/* Mandate terms */}
+      <div className={card}>
+        <h2 className="text-base font-semibold text-neutral-900">Mandate terms</h2>
+        <p className="text-xs text-neutral-400 mt-0.5 mb-4">Signed once · cannot be edited</p>
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-8 gap-y-3">
+          {termRow('Budget per window', `$${session.mandate.budget_per_window}`)}
+          {termRow('Window', `${Math.round(session.mandate.window_seconds / 3600)} hours`)}
+          {termRow('Lifetime cap', `$${session.mandate.lifetime_cap}`)}
+          {termRow('Per purchase', `$${session.mandate.per_purchase_cap}`)}
+          {termRow('Per seller', `${session.mandate.per_seller_pct / 100}%`)}
+          {termRow('Max depth', String(session.mandate.max_depth))}
+          {termRow('Operator', shortAddress(session.mandate.operator_address))}
+        </div>
+      </div>
     </div>
   );
 }

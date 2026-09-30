@@ -96,7 +96,7 @@ useEffect(() => {
   try { localStorage.setItem('bagseven-session', JSON.stringify(session)); } catch { /* ignore */ }
 }, [session]);
 
-const sectionProps = { session, client, busy, persist, run, toast };
+const sectionProps = { session, client, busy, persist, run, toast, onNavigate: (s: string) => setActiveSection(s as Section) };
 
   return (
     <div className="min-h-screen bg-[#f5f6f8] text-[#111827] flex flex-col">
