@@ -1,6 +1,7 @@
 'use client';
 
-import { canonicalMandate, canonicalSpawn, canonicalWithdraw, spendIntentDomain, spendIntentTypes, type SpendIntent } from '@agentos/onchain';
+import { encodeFunctionData } from 'viem';
+import { BagMandateAbi, canonicalMandate, canonicalSpawn, canonicalWithdraw, spendIntentDomain, spendIntentTypes, type SpendIntent } from '@agentos/onchain';
 
 declare global {
   interface Window {
@@ -12,7 +13,8 @@ declare global {
   }
 }
 
-export const CHAIN_ID = Number(process.env.NEXT_PUBLIC_CHAIN_ID ?? 31337);
+export const CHAIN_ID = Number(process.env.NEXT_PUBLIC_CHAIN_ID ?? 11155111);
+const SEPOLIA_CHAIN_ID = '0xaa36a7';
 
 export function hasWallet(): boolean {
   return typeof window !== 'undefined' && !!window.ethereum;
@@ -21,10 +23,33 @@ export function hasWallet(): boolean {
 export async function connectWallet(): Promise<string> {
   const eth = window.ethereum;
   if (!eth) throw new Error('No browser wallet found (install MetaMask)');
+  await ensureSepolia();
   const accounts = (await eth.request({ method: 'eth_requestAccounts' })) as string[];
   const address = accounts[0];
   if (!address) throw new Error('No account selected');
   return address;
+}
+
+/** Ensure MetaMask is on Sepolia, switching the chain if needed. */
+export async function ensureSepolia(): Promise<void> {
+  const eth = window.ethereum;
+  if (!eth) return;
+  const chainId = (await eth.request({ method: 'eth_chainId' })) as string;
+  if (chainId === SEPOLIA_CHAIN_ID) return;
+  try {
+    await eth.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: SEPOLIA_CHAIN_ID }] });
+  } catch {
+    await eth.request({
+      method: 'wallet_addEthereumChain',
+      params: [{
+        chainId: SEPOLIA_CHAIN_ID,
+        chainName: 'Sepolia',
+        nativeCurrency: { name: 'Sepolia Ether', symbol: 'ETH', decimals: 18 },
+        rpcUrls: ['https://ethereum-sepolia-rpc.publicnode.com'],
+        blockExplorerUrls: ['https://sepolia.etherscan.io'],
+      }],
+    });
+  }
 }
 
 /** Read the CURRENTLY selected account without prompting (eth_accounts). */
@@ -74,6 +99,17 @@ export async function sendNativeEth(to: string, amountEth: string): Promise<stri
   const from = await connectWallet();
   const value = BigInt(Math.round(Number(amountEth) * 1e18));
   return (await eth.request({ method: 'eth_sendTransaction', params: [{ from, to, value: `0x${value.toString(16)}` }] })) as string;
+}
+
+/** Owner withdraws directly from the mandate contract via MetaMask (on-chain). */
+export async function withdrawFromContract(contract: string, amountUsdc: string, to: string): Promise<string> {
+  const eth = window.ethereum;
+  if (!eth) throw new Error('No browser wallet found');
+  await ensureSepolia();
+  const from = await connectWallet();
+  const units = BigInt(Math.round(Number(amountUsdc) * 1e6));
+  const data = encodeFunctionData({ abi: BagMandateAbi, functionName: 'withdraw', args: [units, to.toLowerCase()] });
+  return (await eth.request({ method: 'eth_sendTransaction', params: [{ from, to: contract, data, value: '0x0' }] })) as string;
 }
 
 /**

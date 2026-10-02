@@ -12,6 +12,7 @@ import {
 } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import { defineChain } from 'viem';
+import { sepolia } from 'viem/chains';
 import { BagMandateAbi } from './abi.js';
 import { BagMandateBytecode } from './bytecode.js';
 
@@ -51,7 +52,7 @@ export class MandateClient {
   readonly address: Address;
 
   constructor(privateKey: Hex, opts: MandateClientOpts) {
-    const chain = opts.chainId === 31337 ? localChain : undefined;
+    const chain = opts.chainId === 11155111 ? sepolia : opts.chainId === 31337 ? localChain : undefined;
     this.publicClient = createPublicClient({ chain, transport: http(opts.rpcUrl) });
     const account = privateKeyToAccount(privateKey);
     this.address = account.address;

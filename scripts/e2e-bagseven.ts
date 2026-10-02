@@ -62,8 +62,8 @@ async function main(): Promise<void> {
   log('mandate created + contract deployed', !!mandate.contract_address, { contract: mandate.contract_address.slice(0, 10) + '…' });
 
   // 2. Fund the vault (backend faucet).
-  const funded = await api('POST', `/v1/vaults/${mandate.mandate_id}/fund`, { amount: '50' });
-  log('vault funded ($50)', funded.vault_balance === '50.00', { balance: funded.vault_balance });
+  const funded = await api('POST', `/v1/vaults/${mandate.mandate_id}/fund`, { amount: '20' });
+  log('vault funded ()', funded.vault_balance === '20.00', { balance: funded.vault_balance });
 
 // 3. Spawn a child at 50% (owner-signed) under the root agent.
   const rootAgentId = mandate.root_agent_id as string;

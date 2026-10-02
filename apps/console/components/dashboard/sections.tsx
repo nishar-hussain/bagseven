@@ -12,7 +12,7 @@ import {
   signMessage,
   signSpendIntent,
   spawnCanonical,
-  withdrawCanonical,
+  withdrawFromContract,
 } from '../../lib/wallet';
 
 export interface SectionProps {
@@ -66,12 +66,11 @@ export function OverviewSection(props: SectionProps) {
     run('withdraw', async () => {
       if (!session.mandate) throw new Error('sign a mandate first');
       if (!session.ownerAddress) throw new Error('connect your wallet first');
-      const canonical = withdrawCanonical({ mandateId: session.mandate.mandate_id, amount: withdrawAmt, to: session.ownerAddress });
-      const signature = await signMessage(canonical);
-      const res = await client.withdrawVault(session.mandate.mandate_id, { amount: withdrawAmt, to_address: session.ownerAddress, chain_id: CHAIN_ID, signature });
-      persist({ ...session, vaultBalance: res.vault_balance });
+      // Owner signs + submits the contract withdraw directly on-chain (Sepolia).
+      const tx = await withdrawFromContract(session.mandate.contract_address, withdrawAmt, session.ownerAddress);
+      persist({ ...session });
       setWithdrawOpen(false);
-      toast('ok', `Withdrew $${withdrawAmt} — balance $${res.vault_balance}`);
+      toast('ok', `Withdraw submitted on-chain — ${tx.slice(0, 14)}…`);
       await load();
     });
 
@@ -359,11 +358,8 @@ export function MandateSection(props: SectionProps) {
     run('withdraw', async () => {
       if (!session.mandate) throw new Error('sign a mandate first');
       if (!session.ownerAddress) throw new Error('connect your wallet first');
-      const canonical = withdrawCanonical({ mandateId: session.mandate.mandate_id, amount: withdrawAmt, to: session.ownerAddress });
-      const signature = await signMessage(canonical);
-      const res = await client.withdrawVault(session.mandate.mandate_id, { amount: withdrawAmt, to_address: session.ownerAddress, chain_id: CHAIN_ID, signature });
-      persist({ ...session, vaultBalance: res.vault_balance });
-      toast('ok', `Withdrew $${withdrawAmt} — balance $${res.vault_balance}`);
+      const tx = await withdrawFromContract(session.mandate.contract_address, withdrawAmt, session.ownerAddress);
+      toast('ok', `Withdraw submitted on-chain — ${tx.slice(0, 14)}…`);
     });
 
   const spend = () =>
@@ -580,12 +576,9 @@ export function AgentsSection(props: SectionProps) {
     run('withdraw', async () => {
       if (!session.mandate) throw new Error('sign a mandate first');
       if (!session.ownerAddress) throw new Error('connect your wallet first');
-      const canonical = withdrawCanonical({ mandateId: session.mandate.mandate_id, amount: withdrawAmt, to: session.ownerAddress });
-      const signature = await signMessage(canonical);
-      const res = await client.withdrawVault(session.mandate.mandate_id, { amount: withdrawAmt, to_address: session.ownerAddress, chain_id: CHAIN_ID, signature });
-      persist({ ...session, vaultBalance: res.vault_balance });
+      const tx = await withdrawFromContract(session.mandate.contract_address, withdrawAmt, session.ownerAddress);
       setWithdrawOpen(false);
-      toast('ok', `Withdrew $${withdrawAmt} — balance $${res.vault_balance}`);
+      toast('ok', `Withdraw submitted on-chain — ${tx.slice(0, 14)}…`);
       await load();
     });
 
