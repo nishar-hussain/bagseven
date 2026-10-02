@@ -1,16 +1,12 @@
 'use client';
 
-import { useState } from 'react';
+import { ConnectButton } from '@rainbow-me/rainbowkit';
 import { cn } from '../../lib/utils';
-import { shortAddress } from '../../lib/wallet';
 import type { Section } from '../../app/page';
 
 interface HeaderProps {
   activeSection: Section;
   onSectionChange: (s: Section) => void;
-  userWallet?: string;
-  onConnectWallet?: () => Promise<void>;
-  onDisconnectWallet?: () => void;
   mandateExists?: boolean;
 }
 
@@ -22,13 +18,8 @@ const nav: { id: Section; label: string }[] = [
   { id: 'resolve', label: 'Resolve' },
 ];
 
-export function Header({ activeSection, onSectionChange, userWallet, onConnectWallet, onDisconnectWallet, mandateExists }: HeaderProps) {
-  const [busy, setBusy] = useState(false);
+export function Header({ activeSection, onSectionChange, mandateExists }: HeaderProps) {
   const visibleNav = mandateExists ? nav.filter((n) => n.id !== 'mandate') : nav;
-  const connect = async () => {
-    setBusy(true);
-    try { await onConnectWallet?.(); } catch { /* toast handled upstream */ } finally { setBusy(false); }
-  };
 
   return (
     <header className="h-14 bg-white border-b border-neutral-200/80 sticky top-0 z-40 flex items-center justify-between px-6 sm:px-8">
@@ -66,27 +57,43 @@ export function Header({ activeSection, onSectionChange, userWallet, onConnectWa
       </div>
 
       <div className="flex items-center gap-3">
-        <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-neutral-100/90 border border-neutral-200/80 text-xs font-medium text-neutral-700">
-          <span className="w-1.5 h-1.5 rounded-full bg-neutral-400" />
-          <span>Local chain</span>
-        </div>
-        {userWallet ? (
-          <button
-            onClick={() => onDisconnectWallet?.()}
-            className="flex items-center gap-2 px-4 py-1.5 rounded-full text-xs font-medium border border-neutral-200/80 bg-white text-neutral-700 hover:bg-neutral-50 transition-colors cursor-pointer"
-          >
-            <span className="w-1.5 h-1.5 rounded-full bg-green-500" />
-            {shortAddress(userWallet)}
-          </button>
-        ) : (
-          <button
-            onClick={connect}
-            disabled={busy}
-            className="px-4 py-1.5 rounded-full text-xs font-medium text-white shadow-xs bg-gradient-to-r from-[#9855b9] to-[#c24285] hover:opacity-90 transition-opacity disabled:opacity-60 cursor-pointer"
-          >
-            {busy ? 'Connecting…' : 'Connect wallet'}
-          </button>
-        )}
+        <ConnectButton.Custom>
+          {({ account, chain, openConnectModal, mounted }) => {
+            const ready = mounted;
+            return (
+              <div {...(!ready && { 'aria-hidden': true, style: { opacity: 0, pointerEvents: 'none' } })}>
+                {(() => {
+                  if (!ready) return null;
+                  if (!account) {
+                    return (
+                      <button
+                        onClick={openConnectModal}
+                        className="px-4 py-1.5 rounded-full text-xs font-medium text-white shadow-xs bg-gradient-to-r from-[#9855b9] to-[#c24285] hover:opacity-90 transition-opacity cursor-pointer"
+                      >
+                        Connect wallet
+                      </button>
+                    );
+                  }
+                  return (
+                    <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-neutral-100/90 border border-neutral-200/80 text-xs font-medium text-neutral-700">
+                        <span className="w-1.5 h-1.5 rounded-full bg-green-500" />
+                        {chain?.name ?? 'Sepolia'}
+                      </div>
+                      <button
+                        onClick={openConnectModal}
+                        className="flex items-center gap-2 px-3.5 py-1.5 rounded-full text-xs font-medium border border-neutral-200/80 bg-white text-neutral-700 hover:bg-neutral-50 transition-colors cursor-pointer"
+                      >
+                        <span className="w-1.5 h-1.5 rounded-full bg-green-500" />
+                        {account.displayName}
+                      </button>
+                    </div>
+                  );
+                })()}
+              </div>
+            );
+          }}
+        </ConnectButton.Custom>
       </div>
     </header>
   );
