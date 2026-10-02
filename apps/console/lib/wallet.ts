@@ -9,6 +9,7 @@ declare global {
       request: (args: { method: string; params?: unknown[] | object }) => Promise<unknown>;
       on?: (event: string, cb: (...args: unknown[]) => void) => void;
       removeListener?: (event: string, cb: (...args: unknown[]) => void) => void;
+      isMetaMask?: boolean;
     };
   }
 }
@@ -16,12 +17,40 @@ declare global {
 export const CHAIN_ID = Number(process.env.NEXT_PUBLIC_CHAIN_ID ?? 11155111);
 const SEPOLIA_CHAIN_ID = '0xaa36a7';
 
+let cachedProvider: Window['ethereum'] | undefined;
+
+/**
+ * Resolve the wallet provider, PREFERRING MetaMask.
+ * Phantom (and others) also inject `window.ethereum`, so we first look for
+ * MetaMask via EIP-6963 (announced providers) / the isMetaMask flag, and only
+ * fall back to the raw injected provider if MetaMask isn't present.
+ */
+export async function getProvider(): Promise<Window['ethereum'] | undefined> {
+  if (cachedProvider) return cachedProvider;
+  if (typeof window === 'undefined') return undefined;
+
+  const announced: Window['ethereum'][] = [];
+  const handler = (e: Event) => {
+    const detail = (e as CustomEvent<{ info?: { rdns?: string }; provider?: Window['ethereum'] }>).detail;
+    if (detail?.provider) announced.push(detail.provider);
+  };
+  window.addEventListener('eip6963:announceProvider', handler);
+  window.dispatchEvent(new Event('eip6963:requestProvider'));
+  await new Promise((r) => setTimeout(r, 150));
+  window.removeEventListener('eip6963:announceProvider', handler);
+
+  const metamask = announced.find((p) => p?.isMetaMask) ?? announced[0];
+  const injected = window.ethereum;
+  cachedProvider = metamask ?? (injected?.isMetaMask ? injected : injected);
+  return cachedProvider;
+}
+
 export function hasWallet(): boolean {
   return typeof window !== 'undefined' && !!window.ethereum;
 }
 
 export async function connectWallet(): Promise<string> {
-  const eth = window.ethereum;
+  const eth = await getProvider();
   if (!eth) throw new Error('No browser wallet found (install MetaMask)');
   await ensureSepolia();
   const accounts = (await eth.request({ method: 'eth_requestAccounts' })) as string[];
@@ -32,7 +61,7 @@ export async function connectWallet(): Promise<string> {
 
 /** Ensure MetaMask is on Sepolia, switching the chain if needed. */
 export async function ensureSepolia(): Promise<void> {
-  const eth = window.ethereum;
+  const eth = await getProvider();
   if (!eth) return;
   const chainId = (await eth.request({ method: 'eth_chainId' })) as string;
   if (chainId === SEPOLIA_CHAIN_ID) return;
@@ -60,7 +89,7 @@ export async function getCurrentAccount(): Promise<string | null> {
 
 /** Read all accounts the wallet has authorized for this site (no prompt). */
 export async function getWalletAccounts(): Promise<string[]> {
-  const eth = window.ethereum;
+  const eth = await getProvider();
   if (!eth) return [];
   try {
     return (await eth.request({ method: 'eth_accounts' })) as string[];
@@ -70,14 +99,18 @@ export async function getWalletAccounts(): Promise<string[]> {
 }
 
 /**
- * Subscribe to MetaMask account switches so the UI always tracks the account
- * the user is actually on. Returns an unsubscribe function.
+ * Subscribe to wallet account switches so the UI always tracks the account the
+ * user is actually on. Returns an unsubscribe function.
  */
 export function watchAccountChanges(cb: (accounts: string[]) => void): () => void {
-  const eth = window.ethereum;
-  if (!eth?.on) return () => undefined;
-  eth.on('accountsChanged', cb as (...args: unknown[]) => void);
-  return () => eth.removeListener?.('accountsChanged', cb as (...args: unknown[]) => void);
+  let off: (() => void) | undefined;
+  getProvider().then((eth) => {
+    if (eth?.on) {
+      eth.on('accountsChanged', cb as (...args: unknown[]) => void);
+      off = () => eth.removeListener?.('accountsChanged', cb as (...args: unknown[]) => void);
+    }
+  });
+  return () => off?.();
 }
 
 export function shortAddress(a: string): string {
@@ -86,7 +119,7 @@ export function shortAddress(a: string): string {
 
 /** EIP-191 personal_sign via MetaMask. */
 export async function signMessage(message: string): Promise<string> {
-  const eth = window.ethereum;
+  const eth = await getProvider();
   if (!eth) throw new Error('No browser wallet found');
   const signature = (await eth.request({ method: 'personal_sign', params: [message, (await connectWallet())] })) as string;
   return signature;
@@ -94,7 +127,7 @@ export async function signMessage(message: string): Promise<string> {
 
 /** Send native ETH from the connected wallet to `to` via MetaMask. */
 export async function sendNativeEth(to: string, amountEth: string): Promise<string> {
-  const eth = window.ethereum;
+  const eth = await getProvider();
   if (!eth) throw new Error('No browser wallet found');
   const from = await connectWallet();
   const value = BigInt(Math.round(Number(amountEth) * 1e18));
@@ -103,7 +136,7 @@ export async function sendNativeEth(to: string, amountEth: string): Promise<stri
 
 /** Owner withdraws directly from the mandate contract via MetaMask (on-chain). */
 export async function withdrawFromContract(contract: string, amountUsdc: string, to: string): Promise<string> {
-  const eth = window.ethereum;
+  const eth = await getProvider();
   if (!eth) throw new Error('No browser wallet found');
   await ensureSepolia();
   const from = await connectWallet();
@@ -117,7 +150,7 @@ export async function withdrawFromContract(contract: string, amountUsdc: string,
  * signs an EIP-712 spend intent through MetaMask. No browser-held key needed.
  */
 export async function signSpendIntent(intent: SpendIntent, address: string): Promise<string> {
-  const eth = window.ethereum;
+  const eth = await getProvider();
   if (!eth) throw new Error('No browser wallet found');
   const typedData = {
     types: {
