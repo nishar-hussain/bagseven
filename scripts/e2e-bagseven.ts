@@ -6,7 +6,8 @@
  * overview / resolve / withdraw.
  *
  * Usage: pnpm exec tsx scripts/e2e-bagseven.ts
- * Requires: anvil on :8545 (./scripts/dev-chain.sh) + gateway + mandate service.
+ * Requires: gateway + mandate service up, .env pointed at Sepolia (real USDC),
+ * and the master/enforcer wallet funded with Sepolia ETH + USDC.
  */
 import { readFileSync } from 'node:fs';
 import { signMessage, privateKeyToAccount, parseUnits } from 'viem/accounts';
