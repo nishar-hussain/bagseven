@@ -21,6 +21,7 @@ export default function Page() {
   const [activeSection, setActiveSection] = useState<Section>('overview');
   const [busy, setBusy] = useState<string | null>(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
+  const [forceCreate, setForceCreate] = useState(false);
 
   const persist = useCallback((s: Session) => setSession(s), []);
 
@@ -96,7 +97,7 @@ useEffect(() => {
   try { localStorage.setItem('bagseven-session', JSON.stringify(session)); } catch { /* ignore */ }
 }, [session]);
 
-const sectionProps = { session, client, busy, persist, run, toast, onNavigate: (s: string) => setActiveSection(s as Section) };
+const sectionProps = { session, client, busy, persist, run, toast, onNavigate: (s: string) => setActiveSection(s as Section), forceCreateMandate: forceCreate, onConsumeMandateCreate: () => setForceCreate(false), onNewMandate: () => { setForceCreate(true); setActiveSection('mandate'); } };
 
   return (
     <div className="min-h-screen bg-[#f5f6f8] text-[#111827] flex flex-col">

@@ -23,6 +23,9 @@ export interface SectionProps {
   run: (name: string, fn: () => Promise<void>) => Promise<void>;
   toast: (kind: 'ok' | 'error' | 'info', message: string) => void;
   onNavigate?: (s: string) => void;
+  onNewMandate?: () => void;
+  forceCreateMandate?: boolean;
+  onConsumeMandateCreate?: () => void;
 }
 
 const Mono = ({ children }: { children: React.ReactNode }) => <span className="font-mono text-xs">{children}</span>;
@@ -33,7 +36,7 @@ const btn = 'px-5 py-2 rounded-full text-sm font-medium text-white bg-gradient-t
 const btnGhost = 'px-5 py-2 rounded-full text-sm font-medium text-neutral-700 border border-neutral-200/90 bg-white hover:bg-neutral-50 transition disabled:opacity-50 cursor-pointer';
 
 export function OverviewSection(props: SectionProps) {
-  const { session, client, busy, persist, run, toast, onNavigate } = props;
+  const { session, client, busy, persist, run, toast, onNavigate, onNewMandate } = props;
   const [o, setO] = useState<Record<string, unknown> | null>(null);
   const [fundOpen, setFundOpen] = useState(false);
   const [withdrawOpen, setWithdrawOpen] = useState(false);
@@ -151,6 +154,7 @@ export function OverviewSection(props: SectionProps) {
           <p className="text-[13px] text-neutral-500 mt-1">Signed once · cannot be edited.</p>
         </div>
         <div className="flex gap-2">
+          <button onClick={() => onNewMandate?.()} className={btnGhost}>＋ New mandate</button>
           <button onClick={() => setSpawnOpen(true)} className={btnGhost}>Spawn agent</button>
           <button onClick={() => setWithdrawOpen(true)} className={btnGhost}>Withdraw</button>
           <button onClick={() => setFundOpen(true)} className={btn}>Fund vault</button>
@@ -300,7 +304,8 @@ export function OverviewSection(props: SectionProps) {
 }
 
 export function MandateSection(props: SectionProps) {
-  const { session, client, busy, persist, run, toast, onNavigate } = props;
+  const { session, client, busy, persist, run, toast, onNavigate, forceCreateMandate, onConsumeMandateCreate } = props;
+  const [creatingNew, setCreatingNew] = useState(false);
   const [budget, setBudget] = useState('20');
   const [windowH, setWindowH] = useState('24 hours');
   const [lifetime, setLifetime] = useState('100');
@@ -375,12 +380,21 @@ export function MandateSection(props: SectionProps) {
       toast(res.decision === 'allow' ? 'ok' : 'info', res.decision === 'allow' ? `Executed on-chain ${res.tx_hash?.slice(0, 14)}…` : `Refused — ${res.bound}`);
     });
 
-  if (session.mandate) {
+  if (forceCreateMandate && !creatingNew) {
+    setCreatingNew(true);
+    onConsumeMandateCreate?.();
+  }
+  const showCreate = creatingNew || forceCreateMandate || !session.mandate;
+
+  if (session.mandate && !showCreate) {
     return (
       <div className="space-y-4">
-        <div>
-          <h1 className="text-[28px] font-bold text-neutral-900 tracking-tight leading-tight">Mandate</h1>
-          <p className="text-[13px] text-neutral-500 mt-1">Signed once · immutable · enforced on-chain.</p>
+        <div className="flex items-end justify-between gap-4">
+          <div>
+            <h1 className="text-[28px] font-bold text-neutral-900 tracking-tight leading-tight">Mandate</h1>
+            <p className="text-[13px] text-neutral-500 mt-1">Signed once · immutable · enforced on-chain.</p>
+          </div>
+          <button onClick={() => setCreatingNew(true)} className={btnGhost}>＋ New mandate</button>
         </div>
         <div className={card}>
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-6">
@@ -436,9 +450,12 @@ export function MandateSection(props: SectionProps) {
 
   return (
     <div className="space-y-4">
-      <div>
-        <h1 className="text-[28px] font-bold text-neutral-900 tracking-tight leading-tight">New mandate</h1>
-        <p className="text-[13px] text-neutral-500 mt-1 max-w-lg">One budget for every agent under it. You sign once, and it cannot be edited afterwards.</p>
+      <div className="flex items-end justify-between gap-4">
+        <div>
+          <h1 className="text-[28px] font-bold text-neutral-900 tracking-tight leading-tight">New mandate</h1>
+          <p className="text-[13px] text-neutral-500 mt-1 max-w-lg">One budget for every agent under it. You sign once, and it cannot be edited afterwards.</p>
+        </div>
+        {session.mandate && <button onClick={() => setCreatingNew(false)} className={btnGhost}>← Current mandate</button>}
       </div>
 
       <div className="flex flex-col lg:flex-row gap-5 items-start">
