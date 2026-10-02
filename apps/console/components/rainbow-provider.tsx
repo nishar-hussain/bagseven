@@ -1,23 +1,10 @@
 'use client';
 
 import '@rainbow-me/rainbowkit/styles.css';
-import { getDefaultConfig, RainbowKitProvider } from '@rainbow-me/rainbowkit';
+import { RainbowKitProvider } from '@rainbow-me/rainbowkit';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { WagmiProvider } from 'wagmi';
-import { sepolia } from 'wagmi/chains';
-import { http } from 'wagmi';
-
-const projectId = process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID ?? 'YOUR_PROJECT_ID';
-
-export const wagmiConfig = getDefaultConfig({
-  appName: 'Bagseven',
-  projectId,
-  chains: [sepolia],
-  ssr: true,
-  transports: {
-    [sepolia.id]: http(process.env.NEXT_PUBLIC_RPC_URL ?? 'https://ethereum-sepolia-rpc.publicnode.com'),
-  },
-});
+import { wagmiConfig } from '../lib/wagmi';
 
 const queryClient = new QueryClient();
 
