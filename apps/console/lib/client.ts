@@ -61,6 +61,9 @@ export class Client {
   resolveAgent(ref: string) {
     return this.request<Record<string, unknown>>('GET', `/v1/resolve?ref=${encodeURIComponent(ref)}`);
   }
+  setAgentMeta(agentId: string, input: { name?: string; mcp_endpoint?: string }) {
+    return this.request<{ agent: { id: string; name?: string; mcp_endpoint?: string } }>('POST', `/v1/agents/${agentId}/meta`, input);
+  }
   getVault(mandateId: string) {
     return this.request<{ vault_balance: string }>('GET', `/v1/vaults/${mandateId}`);
   }

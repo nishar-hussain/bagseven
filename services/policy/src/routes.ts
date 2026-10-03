@@ -73,6 +73,11 @@ const refusalsQuery = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(50),
 });
 
+const agentMetaSchema = z.object({
+  name: z.string().max(255).optional(),
+  mcp_endpoint: z.string().url().optional(),
+});
+
 function mandateClient(config: NodeJS.ProcessEnv): MandateClient {
   const key = config.ENFORCER_DEV_KEY;
   if (!key) throw new ApiError(503, 'ENFORCER_UNCONFIGURED', 'ENFORCER_DEV_KEY not set');
@@ -219,7 +224,7 @@ export function buildPolicyRoutes(app: FastifyInstance, { db, redis, config }: S
       lifetime_cap: mandate.lifetimeCap,
       vault_available: fromUnits(vault),
       can_be_drawn_now: canDraw,
-      agents: tree.map((a) => ({ id: a.id, operator_address: a.operatorAddress, share_percent: a.sharePercent, depth: a.depth, status: a.status, parent_agent_id: a.parentAgentId })),
+      agents: tree.map((a) => ({ id: a.id, operator_address: a.operatorAddress, share_percent: a.sharePercent, depth: a.depth, status: a.status, parent_agent_id: a.parentAgentId, name: a.name, mcp_endpoint: a.mcpEndpoint })),
       recent_refusals: recentRefusals,
       terms: {
         owner_address: mandate.ownerAddress,
@@ -318,6 +323,21 @@ export function buildPolicyRoutes(app: FastifyInstance, { db, redis, config }: S
     }
   });
 
+  // Set an agent's ENS-style name + MCP endpoint (console metadata, owner-facing).
+  app.post('/v1/agents/:id/meta', async (req) => {
+    const { id } = req.params as { id: string };
+    const body = agentMetaSchema.parse(req.body);
+    const agent = await db.query.agents.findFirst({ where: eq(agents.id, id) });
+    if (!agent) throw new ApiError(404, 'NOT_FOUND', 'agent not found');
+    const [updated] = await db
+      .update(agents)
+      .set({ name: body.name ?? agent.name, mcpEndpoint: body.mcp_endpoint ?? agent.mcpEndpoint })
+      .where(eq(agents.id, id))
+      .returning();
+    if (!updated) throw new ApiError(500, 'AGENT_META_FAILED', 'agent update returned no row');
+    return { agent: { id: updated.id, name: updated.name, mcp_endpoint: updated.mcpEndpoint } };
+  });
+
   app.get('/v1/refusals', async (req) => {
     const query = refusalsQuery.parse(req.query);
     const where = query.agent_id ? eq(refusals.agentId, query.agent_id) : undefined;
@@ -351,7 +371,7 @@ export function buildPolicyRoutes(app: FastifyInstance, { db, redis, config }: S
     const contract = mandate.contractAddress as Address | null;
     const [vault, w, l] = contract ? await Promise.all([client.vaultBalance(contract), client.spendState(contract), client.lifetimeSpent(contract)]) : [0n, 0n, 0n];
     return {
-      agent: { id: agent.id, operator_address: agent.operatorAddress, depth: agent.depth, share_percent: agent.sharePercent, status: agent.status },
+      agent: { id: agent.id, operator_address: agent.operatorAddress, depth: agent.depth, share_percent: agent.sharePercent, status: agent.status, name: agent.name, mcp_endpoint: agent.mcpEndpoint },
       mandate: { id: mandate.id, owner_address: mandate.ownerAddress, contract_address: mandate.contractAddress, budget_per_window: mandate.budgetPerWindow, lifetime_cap: mandate.lifetimeCap, per_purchase_cap: mandate.perPurchaseCap, per_seller_pct: mandate.perSellerPct, max_depth: mandate.maxDepth },
       remaining: {
         vault_available: fromUnits(vault),

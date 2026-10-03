@@ -6,6 +6,20 @@ import { BagMandateAbi, canonicalMandate, canonicalSpawn, canonicalWithdraw, spe
 import { wagmiConfig } from './wagmi';
 
 export const CHAIN_ID = Number(process.env.NEXT_PUBLIC_CHAIN_ID ?? 11155111);
+export const USDC_ADDRESS = (process.env.NEXT_PUBLIC_USDC_ADDRESS ?? '0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238') as `0x${string}`;
+
+const erc20ApproveAbi = [
+  {
+    type: 'function' as const,
+    name: 'approve',
+    inputs: [
+      { name: 'spender', type: 'address' },
+      { name: 'amount', type: 'uint256' },
+    ],
+    outputs: [{ type: 'bool' }],
+    stateMutability: 'nonpayable' as const,
+  },
+];
 
 export function shortAddress(a: string): string {
   return a ? `${a.slice(0, 6)}…${a.slice(-4)}` : '';
@@ -26,7 +40,21 @@ export async function sendNativeEth(to: string, amountEth: string): Promise<stri
 export async function withdrawFromContract(contract: string, amountUsdc: string, to: string): Promise<string> {
   const units = BigInt(Math.round(Number(amountUsdc) * 1e6));
   const data = encodeFunctionData({ abi: BagMandateAbi, functionName: 'withdraw', args: [units, to.toLowerCase()] });
-  return coreSendTransaction(wagmiConfig, { to: contract as `0x${string}`, data });
+  const res = await coreSendTransaction(wagmiConfig, { to: contract as `0x${string}`, data });
+  return res;
+}
+
+/**
+ * Fund the vault from YOUR connected wallet: approve USDC to the mandate
+ * contract, then call fund() — on-chain, no faucet needed.
+ */
+export async function fundFromContract(contract: string, amountUsdc: string): Promise<string> {
+  const units = BigInt(Math.round(Number(amountUsdc) * 1e6));
+  const approveData = encodeFunctionData({ abi: erc20ApproveAbi, functionName: 'approve', args: [contract.toLowerCase(), units] });
+  await coreSendTransaction(wagmiConfig, { to: USDC_ADDRESS, data: approveData });
+  const fundData = encodeFunctionData({ abi: BagMandateAbi, functionName: 'fund', args: [units] });
+  const res = await coreSendTransaction(wagmiConfig, { to: contract as `0x${string}`, data: fundData });
+  return res;
 }
 
 /**

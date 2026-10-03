@@ -6,6 +6,7 @@ import type { Session } from '../../lib/types';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '../ui/dialog';
 import {
   CHAIN_ID,
+  fundFromContract,
   mandateCanonical,
   sendNativeEth,
   shortAddress,
@@ -58,10 +59,11 @@ export function OverviewSection(props: SectionProps) {
   const fund = () =>
     run('fund vault', async () => {
       if (!session.mandate) throw new Error('sign a mandate first');
-      const res = await client.fundVault(session.mandate.mandate_id, fundAmt);
-      persist({ ...session, vaultBalance: res.vault_balance });
+      if (!session.ownerAddress) throw new Error('connect your wallet first');
+      // Send USDC from YOUR wallet into the contract (on-chain, no faucet).
+      const tx = await fundFromContract(session.mandate.contract_address, fundAmt);
       setFundOpen(false);
-      toast('ok', `Vault funded — balance $${res.vault_balance}`);
+      toast('ok', `Funding submitted on-chain — ${tx.slice(0, 14)}…`);
       await load();
     });
 
@@ -514,7 +516,7 @@ export function MandateSection(props: SectionProps) {
 
 export function AgentsSection(props: SectionProps) {
   const { session, client, busy, persist, run, toast } = props;
-  type Agent = { id: string; operator_address: string; share_percent: string; depth: number; status: string; parent_agent_id?: string | null };
+  type Agent = { id: string; operator_address: string; share_percent: string; depth: number; status: string; parent_agent_id?: string | null; name?: string | null; mcp_endpoint?: string | null };
   const [tree, setTree] = useState<Agent[]>([]);
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<'all' | 'live' | 'held' | 'revoked'>('all');
@@ -570,15 +572,20 @@ export function AgentsSection(props: SectionProps) {
     setSpawnOpen(true);
   };
 
-  const bindName = () => {
-    if (!selected) return;
-    const label = nameLabel.trim();
-    if (!label) { toast('error', 'Enter a label'); return; }
-    persist({ ...session, names: { ...(session.names ?? {}), [selected.id]: `${label}.${nameDomain}` } });
-    setNameOpen(false);
-    setNameLabel('');
-    toast('ok', `Bound ${label}.${nameDomain} to the agent`);
-  };
+  const bindName = () =>
+    run('name agent', async () => {
+      if (!selected) return;
+      const label = nameLabel.trim();
+      if (!label) { toast('error', 'Enter a label'); return; }
+      const full = `${label}.${nameDomain}`;
+      const res = await client.setAgentMeta(selected.id, { name: full, mcp_endpoint: nameMcp.trim() || undefined });
+      setTree((t) => t.map((a) => (a.id === selected.id ? { ...a, name: res.agent.name, mcp_endpoint: res.agent.mcp_endpoint } : a)));
+      setSelected((s) => (s ? { ...s, name: res.agent.name, mcp_endpoint: res.agent.mcp_endpoint } : s));
+      persist({ ...session, names: { ...(session.names ?? {}), [selected.id]: full } });
+      setNameOpen(false);
+      setNameLabel('');
+      toast('ok', `Bound ${full} to the agent`);
+    });
 
   const sendGas = () =>
     run('send gas', async () => {
@@ -718,7 +725,8 @@ export function AgentsSection(props: SectionProps) {
 
             <div className={card}>
               <div className="grid gap-3 text-sm">
-                <div><div className="text-xs text-neutral-400">Name</div><div className="mt-0.5">{session.names?.[selected.id] ?? 'Unnamed — a name is bound from the console, not by the contract'}</div></div>
+                <div><div className="text-xs text-neutral-400">Name</div><div className="mt-0.5">{selected.name ?? session.names?.[selected.id] ?? 'Unnamed — a name is bound from the console, not by the contract'}</div></div>
+                {selected.mcp_endpoint && <div><div className="text-xs text-neutral-400">MCP endpoint</div><div className="mt-0.5 font-mono text-xs break-all">{selected.mcp_endpoint}</div></div>}
                 <div><div className="text-xs text-neutral-400">Purpose</div><div className="mt-0.5">None stated</div></div>
                 <div><div className="text-xs text-neutral-400">This window</div><div className="mt-0.5 font-mono">{money(0)} of {money(windowCap(selected))} · 0%</div></div>
                 <div><div className="text-xs text-neutral-400">Lifetime</div><div className="mt-0.5 font-mono">{money(0)} of {money(lifetimeCap(selected))}</div></div>

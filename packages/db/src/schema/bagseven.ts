@@ -51,6 +51,8 @@ export const agents = pgTable(
     operatorAddress: text('operator_address').notNull(),
     sharePercent: numeric('share_percent', { precision: 10, scale: 2 }).notNull(),
     depth: integer('depth').notNull().default(0),
+    name: text('name'),
+    mcpEndpoint: text('mcp_endpoint'),
     status: agentStatus('status').notNull().default('active'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },

@@ -19,6 +19,8 @@ export interface AgentRow {
   depth: number;
   status: string;
   parent_agent_id?: string | null;
+  name?: string | null;
+  mcp_endpoint?: string | null;
 }
 
 export interface Session {
