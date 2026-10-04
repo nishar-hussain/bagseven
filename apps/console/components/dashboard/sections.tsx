@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useAccount } from 'wagmi';
 import { Client } from '../../lib/client';
 import type { Session } from '../../lib/types';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '../ui/dialog';
@@ -38,6 +39,8 @@ const btnGhost = 'px-5 py-2 rounded-full text-sm font-medium text-neutral-700 bo
 
 export function OverviewSection(props: SectionProps) {
   const { session, client, busy, persist, run, toast, onNavigate, onNewMandate } = props;
+  const { address: wagmiAddress } = useAccount();
+  const owner = wagmiAddress ?? session.ownerAddress;
   const [o, setO] = useState<Record<string, unknown> | null>(null);
   const [fundOpen, setFundOpen] = useState(false);
   const [withdrawOpen, setWithdrawOpen] = useState(false);
@@ -59,7 +62,7 @@ export function OverviewSection(props: SectionProps) {
   const fund = () =>
     run('fund vault', async () => {
       if (!session.mandate) throw new Error('sign a mandate first');
-      if (!session.ownerAddress) throw new Error('connect your wallet first');
+      if (!owner) throw new Error('connect your wallet first');
       // Send USDC from YOUR wallet into the contract (on-chain, no faucet).
       const tx = await fundFromContract(session.mandate.contract_address, fundAmt);
       setFundOpen(false);
@@ -70,9 +73,9 @@ export function OverviewSection(props: SectionProps) {
   const withdraw = () =>
     run('withdraw', async () => {
       if (!session.mandate) throw new Error('sign a mandate first');
-      if (!session.ownerAddress) throw new Error('connect your wallet first');
+      if (!owner) throw new Error('connect your wallet first');
       // Owner signs + submits the contract withdraw directly on-chain (Sepolia).
-      const tx = await withdrawFromContract(session.mandate.contract_address, withdrawAmt, session.ownerAddress);
+      const tx = await withdrawFromContract(session.mandate.contract_address, withdrawAmt, owner);
       persist({ ...session });
       setWithdrawOpen(false);
       toast('ok', `Withdraw submitted on-chain — ${tx.slice(0, 14)}…`);
@@ -82,7 +85,7 @@ export function OverviewSection(props: SectionProps) {
   const spawn = () =>
     run('spawn agent', async () => {
       if (!session.mandate) throw new Error('sign a mandate first');
-      if (!session.ownerAddress) throw new Error('connect your wallet first');
+      if (!owner) throw new Error('connect your wallet first');
       if (!spawnOperator.trim()) throw new Error('enter an operator address');
       const parent = session.mandate.root_agent_id;
       const canonical = spawnCanonical({ mandateId: session.mandate.mandate_id, parentAgentId: parent, operator: spawnOperator, sharePercent: Number(spawnShare) });
@@ -218,7 +221,7 @@ export function OverviewSection(props: SectionProps) {
           </div>
           <DialogFooter className="flex justify-end gap-2">
             <button onClick={() => setWithdrawOpen(false)} className={btnGhost}>Cancel</button>
-            <button onClick={withdraw} disabled={busy !== null || !session.ownerAddress} className={btn}>Withdraw ${withdrawAmt}</button>
+            <button onClick={withdraw} disabled={busy !== null || !owner} className={btn}>Withdraw ${withdrawAmt}</button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -307,6 +310,8 @@ export function OverviewSection(props: SectionProps) {
 
 export function MandateSection(props: SectionProps) {
   const { session, client, busy, persist, run, toast, onNavigate, forceCreateMandate, onConsumeMandateCreate } = props;
+  const { address: wagmiAddress } = useAccount();
+  const owner = wagmiAddress ?? session.ownerAddress;
   const [creatingNew, setCreatingNew] = useState(false);
   const [budget, setBudget] = useState('20');
   const [windowH, setWindowH] = useState('24 hours');
@@ -323,7 +328,7 @@ export function MandateSection(props: SectionProps) {
 
   const windowSeconds = windowH === '24 hours' ? 86400 : windowH === '12 hours' ? 43200 : 3600;
   // The typed value is the operator; if left empty it falls back to your creator wallet.
-  const effectiveOperator = operator.trim() || session.ownerAddress || '';
+  const effectiveOperator = operator.trim() || owner || '';
 
   // Restore the persisted operator into the field after a refresh.
   useEffect(() => {
@@ -332,12 +337,12 @@ export function MandateSection(props: SectionProps) {
 
   const sign = () =>
     run('sign mandate', async () => {
-      if (!session.ownerAddress) throw new Error('connect your wallet first (top right)');
+      if (!owner) throw new Error('connect your wallet first (top right)');
       if (!effectiveOperator) throw new Error('enter an operator address (or connect your wallet)');
-      const canonical = mandateCanonical({ owner: session.ownerAddress, operator: effectiveOperator, budgetPerWindow: budget, windowSeconds, lifetimeCap: lifetime, perPurchaseCap: perPurchase, perSellerPct: Math.round(Number(sellerPct) * 100), maxDepth: Number(maxDepth) });
+      const canonical = mandateCanonical({ owner: owner, operator: effectiveOperator, budgetPerWindow: budget, windowSeconds, lifetimeCap: lifetime, perPurchaseCap: perPurchase, perSellerPct: Math.round(Number(sellerPct) * 100), maxDepth: Number(maxDepth) });
       const signature = await signMessage(canonical);
       const m = await client.createMandate({
-        owner_address: session.ownerAddress,
+        owner_address: owner,
         operator_address: effectiveOperator,
         budget_per_window: budget,
         window_seconds: windowSeconds,
@@ -348,8 +353,8 @@ export function MandateSection(props: SectionProps) {
         chain_id: CHAIN_ID,
         signature,
       });
-      persist({ ...session, operatorAddress: effectiveOperator, mandate: { mandate_id: m.mandate_id, root_agent_id: m.root_agent_id, contract_address: m.contract_address, owner_address: session.ownerAddress, operator_address: effectiveOperator, budget_per_window: budget, window_seconds: windowSeconds, lifetime_cap: lifetime, per_purchase_cap: perPurchase, per_seller_pct: Math.round(Number(sellerPct) * 100), max_depth: Number(maxDepth) } });
-      toast('ok', `Mandate signed by ${shortAddress(session.ownerAddress)} — immutable`);
+      persist({ ...session, operatorAddress: effectiveOperator, mandate: { mandate_id: m.mandate_id, root_agent_id: m.root_agent_id, contract_address: m.contract_address, owner_address: owner, operator_address: effectiveOperator, budget_per_window: budget, window_seconds: windowSeconds, lifetime_cap: lifetime, per_purchase_cap: perPurchase, per_seller_pct: Math.round(Number(sellerPct) * 100), max_depth: Number(maxDepth) } });
+      toast('ok', `Mandate signed by ${shortAddress(owner)} — immutable`);
       onNavigate?.('overview');
     });
 
@@ -364,19 +369,19 @@ export function MandateSection(props: SectionProps) {
   const withdraw = () =>
     run('withdraw', async () => {
       if (!session.mandate) throw new Error('sign a mandate first');
-      if (!session.ownerAddress) throw new Error('connect your wallet first');
-      const tx = await withdrawFromContract(session.mandate.contract_address, withdrawAmt, session.ownerAddress);
+      if (!owner) throw new Error('connect your wallet first');
+      const tx = await withdrawFromContract(session.mandate.contract_address, withdrawAmt, owner);
       toast('ok', `Withdraw submitted on-chain — ${tx.slice(0, 14)}…`);
     });
 
   const spend = () =>
     run('spend intent', async () => {
       if (!session.mandate) throw new Error('sign a mandate first');
-      if (!session.ownerAddress) throw new Error('connect your wallet first (it signs the spend)');
+      if (!owner) throw new Error('connect your wallet first (it signs the spend)');
       const agentId = session.mandate.root_agent_id;
       const nonce = Math.floor(Date.now() / 1000);
       // The operator is the key you provided (your creator wallet) — MetaMask signs.
-      const signature = await signSpendIntent({ agentId, amount: spendAmt, recipient: recipient.trim() as `0x${string}`, nonce, timestamp: nonce, chainId: CHAIN_ID }, session.ownerAddress);
+      const signature = await signSpendIntent({ agentId, amount: spendAmt, recipient: recipient.trim() as `0x${string}`, nonce, timestamp: nonce, chainId: CHAIN_ID }, owner);
       const res = await client.spendIntent({ agent_id: agentId, amount: spendAmt, recipient: recipient.trim(), nonce, timestamp: nonce, chain_id: CHAIN_ID, signature });
       setLast(res);
       toast(res.decision === 'allow' ? 'ok' : 'info', res.decision === 'allow' ? `Executed on-chain ${res.tx_hash?.slice(0, 14)}…` : `Refused — ${res.bound}`);
@@ -435,8 +440,8 @@ export function MandateSection(props: SectionProps) {
               <input className={input} value={spendAmt} onChange={(e) => setSpendAmt(e.target.value)} placeholder="0.50" />
               <input className={input} value={recipient} onChange={(e) => setRecipient(e.target.value)} placeholder="0x recipient" />
             </div>
-            <button onClick={spend} disabled={busy !== null || !session.ownerAddress} className={btn}>Run and pay ${spendAmt}</button>
-            {!session.ownerAddress && <p className="text-xs text-amber-600">Connect your wallet to sign spends.</p>}
+            <button onClick={spend} disabled={busy !== null || !owner} className={btn}>Run and pay ${spendAmt}</button>
+            {!owner && <p className="text-xs text-amber-600">Connect your wallet to sign spends.</p>}
             {last && (
               <div className="text-xs space-y-1">
                 <span className={`inline-flex px-2 py-0.5 rounded-full ${last.decision === 'allow' ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>{last.decision}</span>
@@ -504,8 +509,8 @@ export function MandateSection(props: SectionProps) {
               <div className="flex justify-between"><span className="text-neutral-500">Operator</span><span className="font-semibold">{effectiveOperator ? shortAddress(effectiveOperator) : '–'}</span></div>
             </div>
             <div className="mt-6">
-              <button onClick={sign} disabled={busy !== null || !session.ownerAddress || !effectiveOperator} className={`${btn} w-full`}>{busy ? 'Signing…' : 'Sign mandate'}</button>
-              {!session.ownerAddress && <p className="mt-2 text-xs text-amber-600">Connect your wallet first (top right).</p>}
+              <button onClick={sign} disabled={busy !== null || !owner || !effectiveOperator} className={`${btn} w-full`}>{busy ? 'Signing…' : 'Sign mandate'}</button>
+              {!owner && <p className="mt-2 text-xs text-amber-600">Connect your wallet first (top right).</p>}
             </div>
           </div>
         </div>
@@ -516,6 +521,8 @@ export function MandateSection(props: SectionProps) {
 
 export function AgentsSection(props: SectionProps) {
   const { session, client, busy, persist, run, toast } = props;
+  const { address: wagmiAddress } = useAccount();
+  const owner = wagmiAddress ?? session.ownerAddress;
   type Agent = { id: string; operator_address: string; share_percent: string; depth: number; status: string; parent_agent_id?: string | null; name?: string | null; mcp_endpoint?: string | null };
   const [tree, setTree] = useState<Agent[]>([]);
   const [search, setSearch] = useState('');
@@ -554,7 +561,7 @@ export function AgentsSection(props: SectionProps) {
   const spawn = () =>
     run('spawn agent', async () => {
       if (!session.mandate) throw new Error('sign a mandate first');
-      if (!session.ownerAddress) throw new Error('connect your wallet first');
+      if (!owner) throw new Error('connect your wallet first');
       if (!spawnOperator.trim()) throw new Error('enter an operator address');
       const parent = spawnParent || session.mandate.root_agent_id;
       const canonical = spawnCanonical({ mandateId: session.mandate.mandate_id, parentAgentId: parent, operator: spawnOperator, sharePercent: Number(spawnShare) });
@@ -589,7 +596,7 @@ export function AgentsSection(props: SectionProps) {
 
   const sendGas = () =>
     run('send gas', async () => {
-      if (!session.ownerAddress) throw new Error('connect your wallet first');
+      if (!owner) throw new Error('connect your wallet first');
       if (!selected) throw new Error('select an agent first');
       const tx = await sendNativeEth(selected.operator_address, gasAmt);
       setGasOpen(false);
@@ -599,8 +606,8 @@ export function AgentsSection(props: SectionProps) {
   const withdrawVault = () =>
     run('withdraw', async () => {
       if (!session.mandate) throw new Error('sign a mandate first');
-      if (!session.ownerAddress) throw new Error('connect your wallet first');
-      const tx = await withdrawFromContract(session.mandate.contract_address, withdrawAmt, session.ownerAddress);
+      if (!owner) throw new Error('connect your wallet first');
+      const tx = await withdrawFromContract(session.mandate.contract_address, withdrawAmt, owner);
       setWithdrawOpen(false);
       toast('ok', `Withdraw submitted on-chain — ${tx.slice(0, 14)}…`);
       await load();
@@ -838,7 +845,7 @@ export function AgentsSection(props: SectionProps) {
           </div>
           <DialogFooter className="flex justify-end gap-2">
             <button onClick={() => setGasOpen(false)} className={btnGhost}>Cancel</button>
-            <button onClick={sendGas} disabled={busy !== null || !session.ownerAddress} className={btn}>Send {gasAmt} ETH</button>
+            <button onClick={sendGas} disabled={busy !== null || !owner} className={btn}>Send {gasAmt} ETH</button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -862,7 +869,7 @@ export function AgentsSection(props: SectionProps) {
           </div>
           <DialogFooter className="flex justify-end gap-2">
             <button onClick={() => setWithdrawOpen(false)} className={btnGhost}>Cancel</button>
-            <button onClick={withdrawVault} disabled={busy !== null || !session.ownerAddress} className={btn}>Withdraw ${withdrawAmt}</button>
+            <button onClick={withdrawVault} disabled={busy !== null || !owner} className={btn}>Withdraw ${withdrawAmt}</button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
