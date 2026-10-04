@@ -23,6 +23,7 @@ export default function Page() {
   const [busy, setBusy] = useState<string | null>(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [forceCreate, setForceCreate] = useState(false);
+  const [restored, setRestored] = useState(false);
 
   const persist = useCallback((s: Session) => setSession(s), []);
 
@@ -43,12 +44,15 @@ export default function Page() {
     [toast],
   );
 
-  // Restore the persisted session on load.
+  // Restore the persisted session on load BEFORE any persistence happens, so an
+  // empty initial render can never clobber the saved mandate/tree/names.
   useEffect(() => {
     try {
       const raw = localStorage.getItem('bagseven-session');
       if (raw) setSession({ ...EMPTY_SESSION, ...JSON.parse(raw) });
-    } catch { /* ignore */ }
+    } catch { /* ignore */ } finally {
+      setRestored(true);
+    }
   }, []);
 
   // RainbowKit owns the connection — sync the connected account to the owner.
@@ -57,10 +61,11 @@ export default function Page() {
     else setSession((s) => (s.ownerAddress ? { ...s, ownerAddress: undefined } : s));
   }, [address]);
 
-  // Persist the session so a refresh keeps the mandate + operator key.
+  // Persist the session so a refresh keeps the mandate + operator key + tree.
   useEffect(() => {
+    if (!restored) return;
     try { localStorage.setItem('bagseven-session', JSON.stringify(session)); } catch { /* ignore */ }
-  }, [session]);
+  }, [session, restored]);
 
   const sectionProps = { session, client, busy, persist, run, toast, onNavigate: (s: string) => setActiveSection(s as Section), forceCreateMandate: forceCreate, onConsumeMandateCreate: () => setForceCreate(false), onNewMandate: () => { setForceCreate(true); setActiveSection('mandate'); } };
 
