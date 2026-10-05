@@ -8,6 +8,7 @@
     "node": ">=24"
   },
   "scripts": {
+    "mcp": "tsx scripts/bagseven-mcp.ts",
     "build": "turbo run build",
     "dev": "turbo run dev --concurrency=20",
     "lint": "turbo run lint",
@@ -30,8 +31,11 @@
     "@agentos/onchain": "workspace:*",
     "@agentos/server": "workspace:*",
     "@eslint/js": "^10.0.1",
+    "@modelcontextprotocol/sdk": "^1.30.1",
+    "@types/express": "^5.0.0",
     "@types/node": "^26.6.1",
     "eslint": "^10.10.0",
+    "express": "^5.1.0",
     "pm2": "^7.0.4",
     "solc": "^0.8.37",
     "tsx": "^4.23.13",
@@ -39,6 +43,7 @@
     "typescript": "^5.7.0",
     "typescript-eslint": "^8.70.0",
     "viem": "^2.56.8",
-    "vitest": "^5.0.1"
+    "vitest": "^5.0.1",
+    "zod": "^4.6.5"
   }
 }
