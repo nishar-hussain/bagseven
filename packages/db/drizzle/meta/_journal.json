@@ -15,6 +15,20 @@
       "when": 1791020856699,
       "tag": "0001_charming_shadow_king",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1791396000000,
+      "tag": "0002_worker_allocations",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1791396060000,
+      "tag": "0003_providers",
+      "breakpoints": true
     }
   ]
 }

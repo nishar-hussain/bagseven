@@ -2,10 +2,10 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { desc, eq } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
-import { agents, mandates, refusals, reservations, transactions, vaults } from '@bagseven/db';
+import { agents, mandates, providers, refusals, reservations, transactions, vaults } from '@bagseven/db';
 import { validateMoney, sub } from '@bagseven/money';
 import { ApiError, idempotencyOnSend, idempotencyPreHandler, type ServiceDeps } from '@bagseven/server';
-import { canonicalMandate, canonicalSpawn, canonicalWithdraw, MandateClient, recoverEip191, recoverSpendIntentSigner } from '@bagseven/onchain';
+import { canonicalMandate, canonicalSpawn, canonicalWithdraw, MandateClient, recoverEip191, recoverSpendIntentSigner, workerKey } from '@bagseven/onchain';
 import { recoverMessageAddress, type Address } from 'viem';
 
 const BOUNDS: Record<number, string> = {
@@ -16,6 +16,8 @@ const BOUNDS: Record<number, string> = {
   5: 'PerSellerCapExceeded',
   6: 'DepthExceeded',
   7: 'VaultInsufficient',
+  8: 'WorkerInactive',
+  9: 'WorkerAllocationExceeded',
 };
 
 function toUnits(amount: string): bigint {
@@ -61,6 +63,7 @@ const spendIntentSchema = z.object({
 });
 
 const fundSchema = z.object({ amount: z.string().min(1) });
+const settlementSchema = z.object({ tx_hash: z.string().min(1), recipient: z.string().regex(/^0x[0-9a-fA-F]{40}$/) });
 
 const withdrawSchema = z.object({
   amount: z.string().min(1),
@@ -78,6 +81,11 @@ const refusalsQuery = z.object({
 const agentMetaSchema = z.object({
   name: z.string().max(255).optional(),
   mcp_endpoint: z.string().url().optional(),
+});
+
+const providerSchema = z.object({
+  hostname: z.string().min(1).regex(/^[a-z0-9.-]+$/),
+  address: z.string().regex(/^0x[0-9a-fA-F]{40}$/),
 });
 
 function mandateClient(config: NodeJS.ProcessEnv): MandateClient {
@@ -102,6 +110,22 @@ function ownerClient(config: NodeJS.ProcessEnv): MandateClient {
 export function buildPolicyRoutes(app: FastifyInstance, { db, redis, config }: ServiceDeps): void {
   app.addHook('preHandler', idempotencyPreHandler(redis));
   app.addHook('onSend', idempotencyOnSend(redis));
+
+  app.post('/v1/providers', async (req) => {
+    if (!config.PROVIDER_ADMIN_TOKEN || req.headers.authorization !== `Bearer ${config.PROVIDER_ADMIN_TOKEN}`) {
+      throw new ApiError(401, 'UNAUTHORIZED', 'provider registration requires administrator authorization');
+    }
+    const body = providerSchema.parse(req.body);
+    const [provider] = await db.insert(providers).values({ hostname: body.hostname.toLowerCase(), address: body.address.toLowerCase(), status: 'active' }).onConflictDoUpdate({ target: providers.hostname, set: { address: body.address.toLowerCase(), status: 'active' } }).returning();
+    return provider;
+  });
+
+  app.get('/v1/providers/:hostname', async (req) => {
+    const { hostname } = req.params as { hostname: string };
+    const provider = await db.query.providers.findFirst({ where: eq(providers.hostname, hostname.toLowerCase()) });
+    if (!provider || provider.status !== 'active') throw new ApiError(404, 'PROVIDER_NOT_REGISTERED', 'provider is not registered');
+    return { hostname: provider.hostname, address: provider.address };
+  });
 
   const getMandate = async (id: string) => {
     const mandate = await db.query.mandates.findFirst({ where: eq(mandates.id, id) });
@@ -134,11 +158,12 @@ export function buildPolicyRoutes(app: FastifyInstance, { db, redis, config }: S
       throw new ApiError(403, 'SIGNATURE_MISMATCH', 'mandate signature was not produced by the owner address');
     }
 
+    const rootAgentId = randomUUID();
     const client = mandateClient(config);
     const contractAddress = await client.deploy({
       owner: body.owner_address.toLowerCase() as Address,
       operator: body.operator_address.toLowerCase() as Address,
-      enforcer: client.address,
+      enforcer: (config.DAEMON_EXECUTOR_ADDRESS ?? client.address) as Address,
       usdc: (config.USDC_ADDRESS ?? '0x') as Address,
       budgetPerWindow: toUnits(body.budget_per_window),
       windowSeconds: body.window_seconds,
@@ -146,10 +171,11 @@ export function buildPolicyRoutes(app: FastifyInstance, { db, redis, config }: S
       perPurchaseCap: toUnits(body.per_purchase_cap),
       perSellerPct: body.per_seller_pct,
       maxDepth: body.max_depth,
+      rootWorker: workerKey(rootAgentId),
+      rootAllocation: toUnits(body.lifetime_cap),
     });
 
     const mandateId = randomUUID();
-    let rootAgentId: string | undefined;
     await db.transaction(async (tx) => {
       await tx.insert(mandates).values({
         id: mandateId,
@@ -166,9 +192,8 @@ export function buildPolicyRoutes(app: FastifyInstance, { db, redis, config }: S
         status: 'active',
       });
       await tx.insert(vaults).values({ mandateId, contractAddress });
-      const [root] = await tx.insert(agents).values({ mandateId, operatorAddress: body.operator_address.toLowerCase(), sharePercent: '100.00', depth: 0, status: 'active' }).returning();
+      const [root] = await tx.insert(agents).values({ mandateId, operatorAddress: body.operator_address.toLowerCase(), sharePercent: '100.00', allocation: body.lifetime_cap, depth: 0, status: 'active', id: rootAgentId }).returning();
       if (!root) throw new ApiError(500, 'ROOT_AGENT_FAILED', 'root agent insert returned no row');
-      rootAgentId = root.id;
     });
 
     return { mandate_id: mandateId, root_agent_id: rootAgentId, contract_address: contractAddress, status: 'active' };
@@ -257,14 +282,48 @@ export function buildPolicyRoutes(app: FastifyInstance, { db, redis, config }: S
     if (depth > mandate.maxDepth) throw new ApiError(400, 'EXCEEDS_MAX_DEPTH', `child depth ${depth} exceeds max depth ${mandate.maxDepth}`);
     if (body.share_percent > 100) throw new ApiError(400, 'CHILD_TOO_WIDE', 'a child mandate can only be narrower than its parent (share ≤ 100%)');
 
-    const [agent] = await db.insert(agents).values({ mandateId: id, parentAgentId: body.parent_agent_id, operatorAddress: body.operator_address.toLowerCase(), sharePercent: String(body.share_percent), depth, status: 'active' }).returning();
+    const allocation = fromUnits(toUnits(parent.allocation) * BigInt(body.share_percent) / 100n);
+    const [agent] = await db.insert(agents).values({ mandateId: id, parentAgentId: body.parent_agent_id, operatorAddress: body.operator_address.toLowerCase(), sharePercent: String(body.share_percent), allocation, depth, status: 'active' }).returning();
     if (!agent) throw new ApiError(500, 'SPAWN_FAILED', 'agent insert returned no row');
+    try {
+      const client = mandateClient(config);
+      await client.registerWorker(mandate.contractAddress as Address, workerKey(agent.id), workerKey(parent.id), agent.operatorAddress as Address, toUnits(allocation), depth);
+    } catch (error) {
+      throw new ApiError(502, 'WORKER_CHAIN_REGISTRATION_FAILED', (error as Error).message);
+    }
     return { agent_id: agent.id, depth, share_percent: body.share_percent, parent_agent_id: body.parent_agent_id };
   });
 
-  // The hot path. The OPERATOR key signs an EIP-712 spend intent; the backend
-  // verifies the signer is the agent's operator, re-checks the contract, and
-  // executes on-chain. Any bound violation → contract revert → refusal record.
+  app.post('/v1/reservations/:id/settle', async (req) => {
+    if (!config.POLICY_INTERNAL_TOKEN || req.headers.authorization !== `Bearer ${config.POLICY_INTERNAL_TOKEN}`) throw new ApiError(401, 'UNAUTHORIZED', 'internal authorization required');
+    const { id } = req.params as { id: string };
+    const body = settlementSchema.parse(req.body);
+    const reservation = await db.query.reservations.findFirst({ where: eq(reservations.id, id) });
+    if (!reservation) throw new ApiError(404, 'NOT_FOUND', 'reservation not found');
+    if (reservation.status === 'settled') return { status: 'settled', tx_hash: body.tx_hash };
+    const mandate = await getMandate(reservation.mandateId);
+    const client = mandateClient(config);
+    await db.transaction(async (tx) => {
+      await tx.update(reservations).set({ status: 'settled' }).where(eq(reservations.id, id));
+      await tx.insert(transactions).values({ mandateId: mandate.id, agentId: reservation.agentId, txHash: body.tx_hash, amount: reservation.amount, type: 'commit' });
+      const [w, l, s] = await Promise.all([client.spendState(mandate.contractAddress as Address), client.lifetimeSpent(mandate.contractAddress as Address), client.sellerSpent(mandate.contractAddress as Address, body.recipient as Address)]);
+      const sellerSpent = { ...((mandate.sellerSpent as Record<string, string>) ?? {}) };
+      sellerSpent[body.recipient.toLowerCase()] = fromUnits(s);
+      await tx.update(mandates).set({ windowSpent: fromUnits(w), lifetimeSpent: fromUnits(l), sellerSpent }).where(eq(mandates.id, mandate.id));
+    });
+    return { status: 'settled', tx_hash: body.tx_hash };
+  });
+
+  app.post('/v1/reservations/:id/release', async (req) => {
+    if (!config.POLICY_INTERNAL_TOKEN || req.headers.authorization !== `Bearer ${config.POLICY_INTERNAL_TOKEN}`) throw new ApiError(401, 'UNAUTHORIZED', 'internal authorization required');
+    const { id } = req.params as { id: string };
+    await db.update(reservations).set({ status: 'released' }).where(eq(reservations.id, id));
+    return { status: 'released' };
+  });
+
+  // The hot path. The OPERATOR key signs an EIP-712 spend intent; the policy
+  // service verifies the signer and reserves the request. In daemon-executor
+  // mode the daemon submits the transaction, then settles this reservation.
   app.post('/v1/spend-intents', async (req) => {
     const body = spendIntentSchema.parse(req.body);
     const now = Math.floor(Date.now() / 1000);
@@ -286,7 +345,7 @@ export function buildPolicyRoutes(app: FastifyInstance, { db, redis, config }: S
 
     const client = mandateClient(config);
     const contract = mandate.contractAddress as Address;
-    const code = await client.check(contract, toUnits(body.amount), body.recipient as Address, agent.depth);
+    const code = await client.checkWorker(contract, toUnits(body.amount), body.recipient as Address, workerKey(agent.id));
     const refusalId = randomUUID();
 
     if (code !== 0) {
@@ -301,8 +360,19 @@ export function buildPolicyRoutes(app: FastifyInstance, { db, redis, config }: S
       .returning();
     if (!reservation) throw new ApiError(500, 'RESERVE_FAILED', 'reservation insert returned no row');
 
+    if (config.DAEMON_EXECUTOR_ADDRESS) {
+      const [w, l] = await Promise.all([client.spendState(contract), client.lifetimeSpent(contract)]);
+      return {
+        decision: 'allow',
+        reservation_id: reservation.id,
+        authorization: { contract_address: contract, worker_id: workerKey(agent.id), amount: body.amount, recipient: body.recipient, chain_id: body.chain_id },
+        remaining_window: sub(mandate.budgetPerWindow, fromUnits(w + toUnits(body.amount))),
+        remaining_lifetime: sub(mandate.lifetimeCap, fromUnits(l + toUnits(body.amount))),
+      };
+    }
+
     try {
-      const txHash = await client.execute(contract, toUnits(body.amount), body.recipient as Address, agent.depth);
+      const txHash = await client.execute(contract, toUnits(body.amount), body.recipient as Address, workerKey(agent.id));
       await db.transaction(async (tx) => {
         await tx.update(reservations).set({ status: 'settled' }).where(eq(reservations.id, reservation.id));
         await tx.insert(transactions).values({ mandateId: mandate.id, agentId: agent.id, txHash, amount: body.amount, type: 'commit' });

@@ -53,6 +53,16 @@ export const BagMandateAbi: Abi = [
         "name": "maxDepth_",
         "type": "uint8",
         "internalType": "uint8"
+      },
+      {
+        "name": "rootWorker_",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "rootAllocation_",
+        "type": "uint256",
+        "internalType": "uint256"
       }
     ],
     "stateMutability": "nonpayable"
@@ -101,6 +111,35 @@ export const BagMandateAbi: Abi = [
   },
   {
     "type": "function",
+    "name": "checkWorker",
+    "inputs": [
+      {
+        "name": "amount",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "recipient",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "workerId",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "code",
+        "type": "uint8",
+        "internalType": "uint8"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "enforcer",
     "inputs": [],
     "outputs": [
@@ -127,9 +166,9 @@ export const BagMandateAbi: Abi = [
         "internalType": "address"
       },
       {
-        "name": "depth",
-        "type": "uint8",
-        "internalType": "uint8"
+        "name": "workerId",
+        "type": "bytes32",
+        "internalType": "bytes32"
       }
     ],
     "outputs": [],
@@ -241,6 +280,39 @@ export const BagMandateAbi: Abi = [
   },
   {
     "type": "function",
+    "name": "registerWorker",
+    "inputs": [
+      {
+        "name": "workerId",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "parentId",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "operator_",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "allocation_",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "depth_",
+        "type": "uint8",
+        "internalType": "uint8"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
     "name": "revoke",
     "inputs": [],
     "outputs": [],
@@ -255,6 +327,19 @@ export const BagMandateAbi: Abi = [
         "name": "",
         "type": "bool",
         "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "rootWorker",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bytes32",
+        "internalType": "bytes32"
       }
     ],
     "stateMutability": "view"
@@ -290,6 +375,24 @@ export const BagMandateAbi: Abi = [
       }
     ],
     "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "setWorkerActive",
+    "inputs": [
+      {
+        "name": "workerId",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "active",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
   },
   {
     "type": "function",
@@ -411,6 +514,50 @@ export const BagMandateAbi: Abi = [
     "stateMutability": "nonpayable"
   },
   {
+    "type": "function",
+    "name": "workers",
+    "inputs": [
+      {
+        "name": "",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "operator",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "parent",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "allocation",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "spent",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "depth",
+        "type": "uint8",
+        "internalType": "uint8"
+      },
+      {
+        "name": "active",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
     "type": "event",
     "name": "Executed",
     "inputs": [
@@ -472,6 +619,11 @@ export const BagMandateAbi: Abi = [
   },
   {
     "type": "error",
+    "name": "InvalidWorkerParent",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "LifetimeCapExceeded",
     "inputs": []
   },
@@ -498,6 +650,21 @@ export const BagMandateAbi: Abi = [
   {
     "type": "error",
     "name": "VaultInsufficient",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "WorkerAllocationExceeded",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "WorkerAlreadyExists",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "WorkerInactive",
     "inputs": []
   }
 ];

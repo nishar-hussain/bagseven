@@ -1,11 +1,13 @@
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { privateKeyToAccount, type PrivateKeyAccount } from 'viem/accounts';
-import { spendIntentDomain, spendIntentTypes, canonicalSpawn } from '@bagseven/onchain';
+import { spendIntentDomain, spendIntentTypes, canonicalSpawn, MandateClient } from '@bagseven/onchain';
 import { createDb } from '@bagseven/db';
 import { Redis } from 'ioredis';
 import { ApiError, createService, type ServiceDeps } from '@bagseven/server';
+import { recoverEip191 } from '@bagseven/onchain';
 import type { FastifyInstance } from 'fastify';
+import { parseUnits } from 'viem';
 
 const fetchSchema = z.object({
   worker: z.string().min(1),
@@ -28,6 +30,9 @@ const paymentChallengeSchema = z.object({
   chain: z.union([z.string(), z.number()]).optional(),
   token: z.string().optional(),
   nonce: z.string().optional(),
+  provider: z.string().min(1),
+  signature: z.string().regex(/^0x[0-9a-fA-F]+$/),
+  expires_at: z.number().int().positive(),
 });
 
 const spawnSchema = z.object({
@@ -74,7 +79,7 @@ async function daemonApi(config: NodeJS.ProcessEnv, method: string, path: string
   const base = config.POLICY_URL ?? 'http://localhost:4003';
   const response = await fetch(`${base}${path}`, {
     method,
-    headers: body === undefined ? undefined : { 'content-type': 'application/json' },
+    headers: { ...(body === undefined ? {} : { 'content-type': 'application/json' }), ...(config.POLICY_INTERNAL_TOKEN ? { authorization: `Bearer ${config.POLICY_INTERNAL_TOKEN}` } : {}) },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   const text = await response.text();
@@ -101,6 +106,34 @@ function validateProviderUrl(config: NodeJS.ProcessEnv, rawUrl: string): URL {
   return url;
 }
 
+function providerRegistry(config: NodeJS.ProcessEnv): Record<string, string> {
+  try { return JSON.parse(config.BAGSEVEN_PROVIDER_KEYS ?? '{}') as Record<string, string>; }
+  catch { throw new ApiError(503, 'PROVIDER_REGISTRY_INVALID', 'BAGSEVEN_PROVIDER_KEYS must be valid JSON'); }
+}
+
+async function registeredProviderAddress(config: NodeJS.ProcessEnv, hostname: string): Promise<string> {
+  const configured = providerRegistry(config)[hostname];
+  if (configured) return configured.toLowerCase();
+  const registered = await daemonApi(config, 'GET', `/v1/providers/${encodeURIComponent(hostname)}`).catch(() => undefined) as { address?: string } | undefined;
+  if (!registered?.address) throw new ApiError(403, 'PROVIDER_NOT_REGISTERED', 'provider is not registered with Bagseven');
+  return registered.address.toLowerCase();
+}
+
+async function verifyChallenge(config: NodeJS.ProcessEnv, url: URL, challenge: z.infer<typeof paymentChallengeSchema>): Promise<void> {
+  if (challenge.provider !== url.hostname) throw new ApiError(502, 'PAYMENT_PROVIDER_MISMATCH', 'payment challenge provider does not match the requested host');
+  const recipient = challenge.payTo ?? challenge.recipient;
+  if (!recipient) throw new ApiError(502, 'INVALID_PAYMENT_CHALLENGE', 'payment challenge has no recipient');
+  if (challenge.expires_at < Math.floor(Date.now() / 1000)) throw new ApiError(502, 'PAYMENT_CHALLENGE_EXPIRED', 'provider payment challenge has expired');
+  const expectedChain = Number(config.CHAIN_ID ?? 11155111);
+  if (challenge.chain !== undefined && Number(challenge.chain) !== expectedChain) throw new ApiError(502, 'PAYMENT_CHAIN_MISMATCH', 'provider challenge chain does not match Bagseven');
+  const token = config.USDC_ADDRESS?.toLowerCase();
+  if (token && challenge.token && challenge.token.toLowerCase() !== token) throw new ApiError(502, 'PAYMENT_TOKEN_MISMATCH', 'provider challenge token does not match Bagseven');
+  const providerAddress = await registeredProviderAddress(config, url.hostname);
+  const canonical = ['bagseven-payment-v1', url.hostname, challenge.amount, recipient.toLowerCase(), challenge.chain ?? expectedChain, challenge.token?.toLowerCase() ?? token ?? '', challenge.nonce ?? '', challenge.expires_at].join('|');
+  const signer = await recoverEip191(canonical, challenge.signature as `0x${string}`).catch(() => '');
+  if (signer.toLowerCase() !== providerAddress) throw new ApiError(502, 'PAYMENT_CHALLENGE_SIGNATURE_INVALID', 'provider payment challenge signature is invalid');
+}
+
 async function executeSpend(config: NodeJS.ProcessEnv, resolved: ResolvedWorker, amount: string, recipient: string, reason?: string): Promise<SpendResult> {
   const signer = accountFromEnv(config);
   if (signer.address.toLowerCase() !== resolved.agent.operator_address.toLowerCase()) {
@@ -115,7 +148,7 @@ async function executeSpend(config: NodeJS.ProcessEnv, resolved: ResolvedWorker,
     primaryType: 'SpendIntent',
     message: { agentId: resolved.agent.id, amount, recipient: recipient as `0x${string}`, nonce: BigInt(nonce), timestamp: BigInt(now), chainId: BigInt(chainId) },
   });
-  return daemonApi(config, 'POST', '/v1/spend-intents', {
+  const result = await daemonApi(config, 'POST', '/v1/spend-intents', {
     agent_id: resolved.agent.id,
     amount,
     recipient,
@@ -125,10 +158,21 @@ async function executeSpend(config: NodeJS.ProcessEnv, resolved: ResolvedWorker,
     signature,
     reason,
     request_id: randomUUID(),
-  }) as Promise<SpendResult>;
+  }) as SpendResult & { authorization?: { contract_address: string; worker_id: `0x${string}`; amount: string; recipient: `0x${string}` } };
+  if (result.decision !== 'allow' || !config.DAEMON_EXECUTOR_KEY || !result.reservation_id || !result.authorization) return result;
+  const executor = new MandateClient(config.DAEMON_EXECUTOR_KEY as `0x${string}`, { rpcUrl: config.RPC_URL ?? 'http://localhost:8545', chainId });
+  try {
+    if (executor.address.toLowerCase() !== (config.DAEMON_EXECUTOR_ADDRESS ?? executor.address).toLowerCase()) throw new ApiError(403, 'DAEMON_EXECUTOR_MISMATCH', 'daemon executor does not match the configured contract enforcer');
+    const txHash = await executor.execute(result.authorization.contract_address as `0x${string}`, parseUnits(amount, 6), result.authorization.recipient, result.authorization.worker_id);
+    await daemonApi(config, 'POST', `/v1/reservations/${result.reservation_id}/settle`, { tx_hash: txHash, recipient });
+    return { ...result, tx_hash: txHash };
+  } catch (error) {
+    await daemonApi(config, 'POST', `/v1/reservations/${result.reservation_id}/release`, {}).catch(() => undefined);
+    throw new ApiError(502, 'PAYMENT_EXECUTION_FAILED', (error as Error).message);
+  }
 }
 
-function buildRoutes(app: FastifyInstance, { config }: ServiceDeps): void {
+function buildRoutes(app: FastifyInstance, { config, redis }: ServiceDeps): void {
   app.addHook('preHandler', async (req, reply) => {
     const token = config.DAEMON_AUTH_TOKEN;
     if (token && req.headers.authorization !== `Bearer ${token}`) {
@@ -173,6 +217,10 @@ function buildRoutes(app: FastifyInstance, { config }: ServiceDeps): void {
       amount = challenge.amount;
       recipient = challenge.payTo ?? challenge.recipient;
       if (!recipient) throw new ApiError(502, 'INVALID_PAYMENT_CHALLENGE', 'payment challenge has no recipient');
+      await verifyChallenge(config, providerUrl, challenge);
+      const challengeKey = `bagseven:payment-challenge:${providerUrl.hostname}:${challenge.nonce ?? challenge.signature}`;
+      const fresh = await redis.set(challengeKey, '1', 'EX', Math.max(1, challenge.expires_at - Math.floor(Date.now() / 1000)), 'NX');
+      if (fresh !== 'OK') throw new ApiError(409, 'PAYMENT_CHALLENGE_REPLAYED', 'provider payment challenge has already been used');
     }
 
     if (!amount || !recipient) throw new ApiError(400, 'PAYMENT_INPUT_REQUIRED', 'amount and recipient are required');

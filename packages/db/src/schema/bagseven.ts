@@ -4,6 +4,7 @@ export const mandateStatus = pgEnum('mandate_status', ['active', 'revoked', 'sup
 export const agentStatus = pgEnum('agent_status', ['active', 'suspended', 'retired']);
 export const reservationStatus = pgEnum('reservation_status', ['reserved', 'committed', 'settled', 'released']);
 export const txType = pgEnum('tx_type', ['reserve', 'commit', 'withdraw', 'fund']);
+export const providerStatus = pgEnum('provider_status', ['active', 'revoked']);
 
 /**
  * A mandate is the signed, immutable spending contract for an agent tree.
@@ -39,6 +40,18 @@ export const mandates = pgTable(
   ],
 );
 
+export const providers = pgTable(
+  'providers',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    hostname: text('hostname').notNull(),
+    address: text('address').notNull(),
+    status: providerStatus('status').notNull().default('active'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex('uq_providers_hostname').on(t.hostname)],
+);
+
 /** Agents under a mandate tree. The operatorAddress is the agent's hot key. */
 export const agents = pgTable(
   'agents',
@@ -50,6 +63,7 @@ export const agents = pgTable(
     parentAgentId: uuid('parent_agent_id'),
     operatorAddress: text('operator_address').notNull(),
     sharePercent: numeric('share_percent', { precision: 10, scale: 2 }).notNull(),
+    allocation: numeric('allocation', { precision: 38, scale: 18 }).notNull().default('0'),
     depth: integer('depth').notNull().default(0),
     name: text('name'),
     mcpEndpoint: text('mcp_endpoint'),

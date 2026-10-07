@@ -48,6 +48,18 @@ contract BagMandate {
     uint256 public lifetimeSpent;
     mapping(address => uint256) public sellerSpent;
 
+    struct Worker {
+        address operator;
+        bytes32 parent;
+        uint256 allocation;
+        uint256 spent;
+        uint8 depth;
+        bool active;
+    }
+
+    mapping(bytes32 => Worker) public workers;
+    bytes32 public immutable rootWorker;
+
     bool public revoked;
 
     error MandateInactive();
@@ -58,6 +70,10 @@ contract BagMandate {
     error DepthExceeded();
     error VaultInsufficient();
     error Unauthorized();
+    error WorkerInactive();
+    error WorkerAllocationExceeded();
+    error WorkerAlreadyExists();
+    error InvalidWorkerParent();
 
     event Executed(address indexed recipient, uint256 amount, address indexed agent);
     event Withdrawn(address indexed to, uint256 amount);
@@ -73,7 +89,9 @@ contract BagMandate {
         uint256 lifetimeCap_,
         uint256 perPurchaseCap_,
         uint256 perSellerPct_,
-        uint8 maxDepth_
+        uint8 maxDepth_,
+        bytes32 rootWorker_,
+        uint256 rootAllocation_
     ) {
         owner = owner_;
         operator = operator_;
@@ -85,7 +103,9 @@ contract BagMandate {
         perPurchaseCap = perPurchaseCap_;
         perSellerPct = perSellerPct_;
         maxDepth = maxDepth_;
+        rootWorker = rootWorker_;
         windowOpenedAt = block.timestamp;
+        workers[rootWorker_] = Worker(operator_, bytes32(0), rootAllocation_, 0, 0, true);
     }
 
     modifier onlyOwner() {
@@ -132,6 +152,43 @@ contract BagMandate {
         return 0;
     }
 
+    function checkWorker(uint256 amount, address recipient, bytes32 workerId)
+        public
+        view
+        returns (uint8 code)
+    {
+        Worker memory worker = workers[workerId];
+        if (!worker.active || worker.operator == address(0)) return 8; // WorkerInactive
+        code = check(amount, recipient, worker.depth);
+        if (code != 0) return code;
+        bytes32 current = workerId;
+        for (uint8 i = 0; i <= maxDepth; i++) {
+            Worker memory node = workers[current];
+            if (!node.active) return 8;
+            if (node.spent + amount > node.allocation) return 9; // WorkerAllocationExceeded
+            if (node.parent == bytes32(0)) break;
+            current = node.parent;
+        }
+        return 0;
+    }
+
+    function registerWorker(bytes32 workerId, bytes32 parentId, address operator_, uint256 allocation_, uint8 depth_)
+        external
+        onlyEnforcer
+    {
+        if (workers[workerId].operator != address(0)) revert WorkerAlreadyExists();
+        Worker memory parent = workers[parentId];
+        if (!parent.active || depth_ != parent.depth + 1 || depth_ > maxDepth || allocation_ > parent.allocation - parent.spent) {
+            revert InvalidWorkerParent();
+        }
+        workers[workerId] = Worker(operator_, parentId, allocation_, 0, depth_, true);
+    }
+
+    function setWorkerActive(bytes32 workerId, bool active) external onlyOwner {
+        if (workers[workerId].operator == address(0)) revert WorkerInactive();
+        workers[workerId].active = active;
+    }
+
     /** Anyone may fund the vault (the owner, or the dev faucet). */
     function fund(uint256 amount) external {
         require(usdc.transferFrom(msg.sender, address(this), amount), "transferFrom failed");
@@ -143,8 +200,12 @@ contract BagMandate {
      * the enforcer. Every cap is re-checked on-chain; any violation reverts with
      * a named error, settling nothing.
      */
-    function execute(uint256 amount, address recipient, uint8 depth) external onlyEnforcer {
-        uint8 code = check(amount, recipient, depth);
+    function execute(uint256 amount, address recipient, bytes32 workerId) external onlyEnforcer {
+        _execute(amount, recipient, workerId);
+    }
+
+    function _execute(uint256 amount, address recipient, bytes32 workerId) internal {
+        uint8 code = checkWorker(amount, recipient, workerId);
         if (code != 0) {
             if (code == 1) revert MandateInactive();
             if (code == 2) revert PerTxCapExceeded();
@@ -152,7 +213,9 @@ contract BagMandate {
             if (code == 4) revert LifetimeCapExceeded();
             if (code == 5) revert PerSellerCapExceeded();
             if (code == 6) revert DepthExceeded();
-            revert VaultInsufficient();
+            if (code == 7) revert VaultInsufficient();
+            if (code == 8) revert WorkerInactive();
+            revert WorkerAllocationExceeded();
         }
 
         bool reset = block.timestamp - windowOpenedAt >= windowSeconds;
@@ -160,9 +223,15 @@ contract BagMandate {
         if (reset) windowOpenedAt = block.timestamp;
         lifetimeSpent += amount;
         if (recipient != address(0)) sellerSpent[recipient] += amount;
+        bytes32 current = workerId;
+        for (uint8 i = 0; i <= maxDepth; i++) {
+            workers[current].spent += amount;
+            if (workers[current].parent == bytes32(0)) break;
+            current = workers[current].parent;
+        }
 
         require(usdc.transfer(recipient, amount), "transfer failed");
-        emit Executed(recipient, amount, operator);
+        emit Executed(recipient, amount, workers[workerId].operator);
     }
 
     /** Owner can always withdraw available USDC (never blocked by caps). */

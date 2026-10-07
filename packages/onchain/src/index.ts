@@ -10,6 +10,7 @@ import {
   type PublicClient,
   type WalletClient,
 } from 'viem';
+import { keccak256, stringToHex } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import { defineChain } from 'viem';
 import { sepolia } from 'viem/chains';
@@ -37,6 +38,8 @@ export interface MandateCaps {
   perPurchaseCap: bigint;
   perSellerPct: number;
   maxDepth: number;
+  rootWorker: Hex;
+  rootAllocation: bigint;
 }
 
 export interface MandateClientOpts {
@@ -74,6 +77,8 @@ export class MandateClient {
         caps.perPurchaseCap,
         BigInt(caps.perSellerPct),
         caps.maxDepth,
+        caps.rootWorker,
+        caps.rootAllocation,
       ],
     } as any);
     const receipt = await this.publicClient.waitForTransactionReceipt({ hash });
@@ -88,6 +93,10 @@ export class MandateClient {
   /** Pure bounds check (eth_call — 0 = ok, else an error code). */
   async check(contract: Address, amount: bigint, recipient: Address, depth: number): Promise<number> {
     return Number((await this.read('check', [amount, recipient, depth], contract)) as bigint);
+  }
+
+  async checkWorker(contract: Address, amount: bigint, recipient: Address, workerId: Hex): Promise<number> {
+    return Number((await this.read('checkWorker', [amount, recipient, workerId], contract)) as bigint);
   }
 
   async spendState(contract: Address): Promise<bigint> {
@@ -112,15 +121,21 @@ export class MandateClient {
   }
 
   /** Execute a spend as the enforcer. Throws with the NAMED error on violation. */
-  async execute(contract: Address, amount: bigint, recipient: Address, depth: number): Promise<Hex> {
+  async execute(contract: Address, amount: bigint, recipient: Address, workerId: Hex): Promise<Hex> {
     try {
-      const hash = await this.write(contract, abi, 'execute', [amount, recipient, depth]);
+      const hash = await this.write(contract, abi, 'execute', [amount, recipient, workerId]);
       const receipt = await this.publicClient.waitForTransactionReceipt({ hash });
       if (receipt.status !== 'success') throw new Error('execute reverted');
       return hash;
     } catch (err) {
       throw new Error(decodeRevert(err), { cause: err });
     }
+  }
+
+  async registerWorker(contract: Address, workerId: Hex, parentId: Hex, operator: Address, allocation: bigint, depth: number): Promise<Hex> {
+    const hash = await this.write(contract, abi, 'registerWorker', [workerId, parentId, operator, allocation, depth]);
+    await this.publicClient.waitForTransactionReceipt({ hash });
+    return hash;
   }
 
   /** Owner withdraw. */
@@ -260,6 +275,10 @@ export function canonicalSpawn(input: {
   chainId: number;
 }): string {
   return ['bagseven-spawn-v1', input.mandateId, input.parentAgentId, input.operator, input.sharePercent, input.chainId].join('|');
+}
+
+export function workerKey(workerId: string): Hex {
+  return keccak256(stringToHex(workerId));
 }
 
 export function canonicalWithdraw(input: { mandateId: string; amount: string; to: Address; chainId: number }): string {
