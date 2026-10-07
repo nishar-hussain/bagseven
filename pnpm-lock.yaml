@@ -8,16 +8,16 @@ importers:
 
   .:
     devDependencies:
-      '@agentos/db':
+      '@bagseven/db':
         specifier: workspace:*
         version: link:packages/db
-      '@agentos/money':
+      '@bagseven/money':
         specifier: workspace:*
         version: link:packages/money
-      '@agentos/onchain':
+      '@bagseven/onchain':
         specifier: workspace:*
         version: link:packages/onchain
-      '@agentos/server':
+      '@bagseven/server':
         specifier: workspace:*
         version: link:packages/server
       '@eslint/js':
@@ -68,7 +68,7 @@ importers:
 
   apps/console:
     dependencies:
-      '@agentos/onchain':
+      '@bagseven/onchain':
         specifier: workspace:*
         version: link:../../packages/onchain
       '@radix-ui/react-avatar':
@@ -254,7 +254,7 @@ importers:
 
   packages/server:
     dependencies:
-      '@agentos/db':
+      '@bagseven/db':
         specifier: workspace:*
         version: link:../db
       fastify:
@@ -267,12 +267,36 @@ importers:
         specifier: ^4.6.5
         version: 4.6.5
 
-  services/gateway:
+  services/daemon:
     dependencies:
-      '@agentos/db':
+      '@bagseven/db':
         specifier: workspace:*
         version: link:../../packages/db
-      '@agentos/server':
+      '@bagseven/onchain':
+        specifier: workspace:*
+        version: link:../../packages/onchain
+      '@bagseven/server':
+        specifier: workspace:*
+        version: link:../../packages/server
+      fastify:
+        specifier: ^5.12.5
+        version: 5.12.5
+      ioredis:
+        specifier: ^6.0.0
+        version: 6.0.0
+      viem:
+        specifier: ^2.56.8
+        version: 2.56.8(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@5.0.10)(zod@4.6.5)
+      zod:
+        specifier: ^4.6.5
+        version: 4.6.5
+
+  services/gateway:
+    dependencies:
+      '@bagseven/db':
+        specifier: workspace:*
+        version: link:../../packages/db
+      '@bagseven/server':
         specifier: workspace:*
         version: link:../../packages/server
       '@fastify/cors':
@@ -293,16 +317,16 @@ importers:
 
   services/policy:
     dependencies:
-      '@agentos/db':
+      '@bagseven/db':
         specifier: workspace:*
         version: link:../../packages/db
-      '@agentos/money':
+      '@bagseven/money':
         specifier: workspace:*
         version: link:../../packages/money
-      '@agentos/onchain':
+      '@bagseven/onchain':
         specifier: workspace:*
         version: link:../../packages/onchain
-      '@agentos/server':
+      '@bagseven/server':
         specifier: workspace:*
         version: link:../../packages/server
       drizzle-orm:

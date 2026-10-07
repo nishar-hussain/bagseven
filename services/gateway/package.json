@@ -1,5 +1,5 @@
 {
-  "name": "@agentos/gateway",
+  "name": "@bagseven/gateway",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -20,8 +20,8 @@
     "start": "node --env-file-if-exists=../../.env dist/index.js"
   },
   "dependencies": {
-    "@agentos/db": "workspace:*",
-    "@agentos/server": "workspace:*",
+    "@bagseven/db": "workspace:*",
+    "@bagseven/server": "workspace:*",
     "@fastify/cors": "^11.3.0",
     "drizzle-orm": "^0.45.2",
     "fastify": "^5.12.5",

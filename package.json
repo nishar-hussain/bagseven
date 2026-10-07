@@ -1,14 +1,15 @@
 {
-  "name": "agentos",
+  "name": "bagseven",
   "version": "0.1.0",
   "private": true,
-  "description": "AgentOS — infrastructure for autonomous AI agents: identity, treasury, policy, marketplaces, evolution",
+  "description": "Bagseven — infrastructure for autonomous AI agents: identity, policy, treasury, marketplaces, and controlled execution",
   "packageManager": "pnpm@10.33.0",
   "engines": {
     "node": ">=24"
   },
   "scripts": {
-    "cordon-mcp": "tsx scripts/cordon-mcp.ts",
+    "bagseven-mcp": "tsx scripts/bagseven-mcp.ts",
+    "bagseven-daemon": "pnpm --filter @bagseven/daemon start",
     "build": "turbo run build",
     "dev": "turbo run dev --concurrency=20",
     "lint": "turbo run lint",
@@ -16,9 +17,9 @@
     "test": "turbo run test",
     "db:up": "docker compose -f deploy/docker-compose.yml up -d",
     "db:down": "docker compose -f deploy/docker-compose.yml down",
-    "db:migrate": "pnpm --filter @agentos/db run migrate",
-    "db:generate": "pnpm --filter @agentos/db run generate",
-    "db:studio": "pnpm --filter @agentos/db run studio",
+    "db:migrate": "pnpm --filter @bagseven/db run migrate",
+    "db:generate": "pnpm --filter @bagseven/db run generate",
+    "db:studio": "pnpm --filter @bagseven/db run studio",
     "pm2:start": "pnpm exec pm2 start deploy/ecosystem.config.cjs",
     "pm2:stop": "pnpm exec pm2 stop deploy/ecosystem.config.cjs",
     "pm2:status": "pnpm exec pm2 status",
@@ -26,10 +27,10 @@
     "pm2:restart": "pnpm exec pm2 restart deploy/ecosystem.config.cjs"
   },
   "devDependencies": {
-    "@agentos/db": "workspace:*",
-    "@agentos/money": "workspace:*",
-    "@agentos/onchain": "workspace:*",
-    "@agentos/server": "workspace:*",
+    "@bagseven/db": "workspace:*",
+    "@bagseven/money": "workspace:*",
+    "@bagseven/onchain": "workspace:*",
+    "@bagseven/server": "workspace:*",
     "@eslint/js": "^10.0.1",
     "@modelcontextprotocol/sdk": "^1.30.1",
     "@types/express": "^5.0.0",

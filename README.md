@@ -12,6 +12,7 @@ See `docs/DECISIONS.md` for the hard invariants the build encodes (spend_token, 
 apps/console          # Next.js developer console (browser UI: identity → treasury → marketplace)
 services/             # independently deployable services
   gateway/            # single public ingress: envelope auth, rate limit, routing, CORS
+  daemon/             # trusted worker between MCP and policy/mandate execution
   identity/           # agents, orgs, guardians
   policy/             # budgets, limits, delegation, spend_token issuance
   treasury/           # wallets, reservations, co-signing, signer abstraction
@@ -49,10 +50,29 @@ pnpm exec tsx scripts/gen-policy-key.ts
 ## Run
 
 ```bash
-pnpm dev                   # boots all 5 services + the console (Turbo TUI dashboard)
+pnpm dev                   # boots the workspace services + console
+pnpm --filter @bagseven/daemon dev
+pnpm bagseven-mcp
 ```
 
-Or start pieces individually via `pnpm --filter @agentos/<svc> start`. Services (defaults): gateway `:4000`, identity `:4001`, treasury `:4002`, policy `:4003`, verification `:4004`.
+Or start pieces individually via `pnpm --filter @bagseven/<svc> start`. Services (defaults): gateway `:4000`, daemon `:4001`, policy `:4003`, MCP `:4009`.
+
+## Bagseven daemon and MCP
+
+The MCP server is the agent-facing adapter. It contains no signing or policy logic. Requests flow through the Bagseven daemon:
+
+```text
+AI agent → Bagseven MCP → Bagseven daemon → policy service → BagMandate contract → vault
+```
+
+Start the daemon and MCP locally:
+
+```bash
+pnpm --filter @bagseven/daemon dev
+BAGSEVEN_MCP_PORT=4009 pnpm bagseven-mcp
+```
+
+The MCP tools are `bagseven_status`, `bagseven_fetch`, and `bagseven_spawn`. The daemon uses `DAEMON_OPERATOR_KEY` and `DAEMON_OWNER_KEY` in development; production must use managed custody such as HSM, MPC, or a smart account.
 
 ## Console
 
@@ -66,7 +86,7 @@ The browser UI at **http://localhost:3000** walks the full Phase-1 flow in five 
 
 The console signs request envelopes in the browser with WebCrypto (Ed25519) — no private key leaves the page except the agent's signing key shown once at creation. Session state lives in `localStorage`.
 
-To point the console at a different gateway: `NEXT_PUBLIC_GATEWAY_URL=https://… pnpm --filter @agentos/console dev` (default `http://localhost:4000`).
+To point the console at a different gateway: `NEXT_PUBLIC_GATEWAY_URL=https://… pnpm --filter @bagseven/console dev` (default `http://localhost:4000`).
 
 ## Verify Phase 1 end-to-end
 
@@ -117,7 +137,7 @@ POST /v1/tools/:id/execute  (marketplace-tools)
 
 - **Providers** register (`pending`) then get approved (`active`); tools carry a price, category, and endpoint. Discovery: `GET /v1/tools?category=&max_price=`.
 - **PayTo binding (2.6):** the settlement goes to the provider's *registered* payout address, never a challenge-supplied one; a mismatch aborts the payment *before any signature*.
-- **MCP (2.4):** `http://localhost:4008/v1/mcp` exposes every active tool to any MCP-compatible agent framework (`tools/list`, `tools/call`).
+- **MCP:** `http://localhost:4009/v1/mcp` exposes Bagseven control tools to any MCP-compatible agent framework (`tools/list`, `tools/call`).
 - **Demo provider:** `services/demo-provider` returns 402-without-payment and 200-with-payment (verifying the tx on-chain), so the whole flow is testable locally.
 
 Verify end-to-end (against whatever `SEPOLIA_RPC_URL` points at):
@@ -141,7 +161,7 @@ In `real` mode the treasury holds a **master account** (`TREASURY_MASTER_PRIVATE
 
 ```bash
 # 1. Run a local EVM chain that mimics Ethereum Sepolia (chain id 11155111)
-docker run -d --name agentos-anvil -p 8545:8545 ghcr.io/foundry-rs/foundry:stable "anvil --host 0.0.0.0 --chain-id 11155111 --silent"
+docker run -d --name bagseven-anvil -p 8545:8545 ghcr.io/foundry-rs/foundry:stable "anvil --host 0.0.0.0 --chain-id 11155111 --silent"
 
 # 2. Deploy a mock USDC + mint to the master account (prints MOCK_USDC + master address)
 node scripts/deploy-mock-usdc.mjs
@@ -169,7 +189,7 @@ real local transactions, zero faucet visits:
 
 ```bash
 node scripts/setup-local.mjs     # start Anvil + deploy mock USDC + point .env at it
-pkill -f "dist/index.js"; for s in gateway identity treasury policy verification; do pnpm --filter "@agentos/$s" start & done
+pkill -f "dist/index.js"; for s in gateway daemon policy; do pnpm --filter "@bagseven/$s" start & done
 E2E_CREDIT=10 E2E_SPEND=3 pnpm exec tsx scripts/e2e-real.ts   # full real-local E2E
 ```
 

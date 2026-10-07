@@ -1,18 +1,18 @@
-name: agentos
+name: bagseven
 
 services:
   postgres:
     image: postgres:17
     environment:
-      POSTGRES_USER: agentos
-      POSTGRES_PASSWORD: agentos
-      POSTGRES_DB: agentos
+      POSTGRES_USER: bagseven
+      POSTGRES_PASSWORD: bagseven
+      POSTGRES_DB: bagseven
     ports:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U agentos -d agentos"]
+      test: ["CMD-SHELL", "pg_isready -U bagseven -d bagseven"]
       interval: 5s
       timeout: 5s
       retries: 10

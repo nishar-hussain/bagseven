@@ -1,4 +1,4 @@
-# @agentos/contracts — Bagseven mandate + vault (on-chain)
+# @bagseven/contracts — Bagseven mandate + vault (on-chain)
 
 The deployable on-chain half of the hybrid mandate architecture:
 
@@ -11,7 +11,7 @@ The deployable on-chain half of the hybrid mandate architecture:
   the mandate), `withdraw` (operator, available only).
 
 The running services enforce the same semantics **off-chain** via
-`@agentos/mandate` (the mirror engine) until a mandate contract is deployed and
+`@bagseven/mandate` (the mirror engine) until a mandate contract is deployed and
 its address set on the mandate row (`mandates.contract_address`) plus the
 enforcer key configured. Then settlement can move through the contract.
 

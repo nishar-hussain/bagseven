@@ -5,7 +5,7 @@ export default defineConfig({
   schema: './src/schema/index.ts',
   out: './drizzle',
   dbCredentials: {
-    url: process.env.DATABASE_URL ?? 'postgres://agentos:agentos@localhost:5432/agentos',
+    url: process.env.DATABASE_URL ?? 'postgres://bagseven:bagseven@localhost:5432/bagseven',
   },
   strict: true,
   verbose: true,

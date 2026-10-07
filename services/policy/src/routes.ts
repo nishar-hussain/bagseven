@@ -2,10 +2,10 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { desc, eq } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
-import { agents, mandates, refusals, reservations, transactions, vaults } from '@agentos/db';
-import { validateMoney, sub } from '@agentos/money';
-import { ApiError, idempotencyOnSend, idempotencyPreHandler, type ServiceDeps } from '@agentos/server';
-import { canonicalMandate, canonicalSpawn, canonicalWithdraw, MandateClient, recoverEip191, recoverSpendIntentSigner } from '@agentos/onchain';
+import { agents, mandates, refusals, reservations, transactions, vaults } from '@bagseven/db';
+import { validateMoney, sub } from '@bagseven/money';
+import { ApiError, idempotencyOnSend, idempotencyPreHandler, type ServiceDeps } from '@bagseven/server';
+import { canonicalMandate, canonicalSpawn, canonicalWithdraw, MandateClient, recoverEip191, recoverSpendIntentSigner } from '@bagseven/onchain';
 import { recoverMessageAddress, type Address } from 'viem';
 
 const BOUNDS: Record<number, string> = {
@@ -56,6 +56,8 @@ const spendIntentSchema = z.object({
   timestamp: z.number().int().positive(),
   chain_id: z.number().int().default(31337),
   signature: z.string().min(1),
+  reason: z.string().max(500).optional(),
+  request_id: z.string().uuid().optional(),
 });
 
 const fundSchema = z.object({ amount: z.string().min(1) });
@@ -265,6 +267,10 @@ export function buildPolicyRoutes(app: FastifyInstance, { db, redis, config }: S
   // executes on-chain. Any bound violation → contract revert → refusal record.
   app.post('/v1/spend-intents', async (req) => {
     const body = spendIntentSchema.parse(req.body);
+    const now = Math.floor(Date.now() / 1000);
+    if (Math.abs(now - body.timestamp) > Number(config.SPEND_INTENT_MAX_AGE_SECONDS ?? 300)) {
+      throw new ApiError(400, 'SPEND_INTENT_EXPIRED', 'spend intent timestamp is outside the allowed window');
+    }
     const agent = await db.query.agents.findFirst({ where: eq(agents.id, body.agent_id) });
     if (!agent) throw new ApiError(404, 'NOT_FOUND', 'agent not found');
     const mandate = await getMandate(agent.mandateId);
@@ -285,7 +291,7 @@ export function buildPolicyRoutes(app: FastifyInstance, { db, redis, config }: S
 
     if (code !== 0) {
       const bound = BOUNDS[code] ?? 'Unknown';
-      await db.insert(refusals).values({ id: refusalId, mandateId: mandate.id, agentId: agent.id, amount: body.amount, seller: body.recipient, bound, reason: bound });
+      await db.insert(refusals).values({ id: refusalId, mandateId: mandate.id, agentId: agent.id, amount: body.amount, seller: body.recipient, bound, reason: body.reason ?? bound });
       return { decision: 'refused', refusal_id: refusalId, bound, reason: bound };
     }
 
@@ -317,7 +323,7 @@ export function buildPolicyRoutes(app: FastifyInstance, { db, redis, config }: S
       const bound = /(MandateInactive|PerTxCapExceeded|DailyCapExceeded|LifetimeCapExceeded|PerSellerCapExceeded|DepthExceeded|VaultInsufficient)/.exec((err as Error).message)?.[1] ?? 'ExecuteFailed';
       await db.transaction(async (tx) => {
         await tx.update(reservations).set({ status: 'released' }).where(eq(reservations.id, reservation.id));
-        await tx.insert(refusals).values({ id: refusalId, mandateId: mandate.id, agentId: agent.id, amount: body.amount, seller: body.recipient, bound, reason: bound });
+        await tx.insert(refusals).values({ id: refusalId, mandateId: mandate.id, agentId: agent.id, amount: body.amount, seller: body.recipient, bound, reason: body.reason ?? bound });
       });
       return { decision: 'refused', refusal_id: refusalId, bound, reason: bound };
     }

@@ -1,6 +1,6 @@
 import Fastify, { type FastifyInstance, type FastifyServerOptions } from 'fastify';
 import type { Redis } from 'ioredis';
-import type { Database } from '@agentos/db';
+import type { Database } from '@bagseven/db';
 import { errorResponse } from './errors.js';
 
 export interface ServiceDeps {

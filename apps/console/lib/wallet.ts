@@ -1,8 +1,13 @@
 'use client';
 
 import { encodeFunctionData } from 'viem';
-import { signMessage as coreSignMessage, signTypedData as coreSignTypedData, sendTransaction as coreSendTransaction } from '@wagmi/core';
-import { BagMandateAbi, canonicalMandate, canonicalSpawn, canonicalWithdraw, spendIntentDomain, spendIntentTypes, type SpendIntent } from '@agentos/onchain';
+import {
+  signMessage as coreSignMessage,
+  signTypedData as coreSignTypedData,
+  sendTransaction as coreSendTransaction,
+  waitForTransactionReceipt,
+} from '@wagmi/core';
+import { BagMandateAbi, canonicalMandate, canonicalSpawn, canonicalWithdraw, spendIntentDomain, spendIntentTypes, type SpendIntent } from '@bagseven/onchain';
 import { wagmiConfig } from './wagmi';
 
 export const CHAIN_ID = Number(process.env.NEXT_PUBLIC_CHAIN_ID ?? 11155111);
@@ -51,10 +56,16 @@ export async function withdrawFromContract(contract: string, amountUsdc: string,
 export async function fundFromContract(contract: string, amountUsdc: string): Promise<string> {
   const units = BigInt(Math.round(Number(amountUsdc) * 1e6));
   const approveData = encodeFunctionData({ abi: erc20ApproveAbi, functionName: 'approve', args: [contract.toLowerCase(), units] });
-  await coreSendTransaction(wagmiConfig, { to: USDC_ADDRESS, data: approveData });
+  const approveHash = await coreSendTransaction(wagmiConfig, { to: USDC_ADDRESS, data: approveData });
+  // The mandate's fund() call uses transferFrom(). Wait for the approval to be
+  // mined before submitting fund(), otherwise the RPC can process fund() while
+  // the allowance is still zero and the vault funding transaction reverts.
+  await waitForTransactionReceipt(wagmiConfig, { hash: approveHash });
   const fundData = encodeFunctionData({ abi: BagMandateAbi, functionName: 'fund', args: [units] });
-  const res = await coreSendTransaction(wagmiConfig, { to: contract as `0x${string}`, data: fundData });
-  return res;
+  const fundHash = await coreSendTransaction(wagmiConfig, { to: contract as `0x${string}`, data: fundData });
+  // Do not refresh the UI until the USDC transfer is confirmed on-chain.
+  await waitForTransactionReceipt(wagmiConfig, { hash: fundHash });
+  return fundHash;
 }
 
 /**

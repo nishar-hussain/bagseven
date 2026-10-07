@@ -1,8 +1,8 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { randomUUID } from 'node:crypto';
-import { createDb } from '@agentos/db';
+import { createDb } from '@bagseven/db';
 import { Redis } from 'ioredis';
-import { rateLimit, createService } from '@agentos/server';
+import { rateLimit, createService } from '@bagseven/server';
 import cors from '@fastify/cors';
 
 async function proxy(req: FastifyRequest, reply: FastifyReply, cfg: NodeJS.ProcessEnv): Promise<unknown> {
@@ -35,12 +35,12 @@ export function buildGatewayRoutes(app: FastifyInstance, { redis, config }: { db
 
 async function main(): Promise<void> {
   const db = createDb({
-    connectionString: process.env.DATABASE_URL ?? 'postgres://agentos:agentos@localhost:5432/agentos',
+    connectionString: process.env.DATABASE_URL ?? 'postgres://bagseven:bagseven@localhost:5432/bagseven',
   });
   const redis = new Redis(process.env.REDIS_URL ?? 'redis://localhost:6379');
 
   await createService({
-    name: 'gateway',
+    name: 'bagseven-gateway',
     port: Number(process.env.GATEWAY_PORT ?? 4000),
     db,
     redis,

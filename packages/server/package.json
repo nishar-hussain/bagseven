@@ -1,5 +1,5 @@
 {
-  "name": "@agentos/server",
+  "name": "@bagseven/server",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -18,7 +18,7 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
-    "@agentos/db": "workspace:*",
+    "@bagseven/db": "workspace:*",
     "fastify": "^5.12.5",
     "ioredis": "^6.0.0",
     "zod": "^4.6.5"

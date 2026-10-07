@@ -1,4 +1,4 @@
-# AgentOS — Architecture Decisions
+# Bagseven — Architecture Decisions
 
 Status: **authoritative**. Every mechanism here is a hard invariant. Do not weaken without a new decision entry.
 
@@ -57,11 +57,11 @@ Every settled tx writes exactly two `ledger_entries`: debit payer, credit payee.
 
 ## D10. Money
 
-Money is never a float. Canonical decimal strings (≤18 fractional digits) end-to-end; `NUMERIC(38,18)` in Postgres. `@agentos/money` is the only arithmetic allowed.
+Money is never a float. Canonical decimal strings (≤18 fractional digits) end-to-end; `NUMERIC(38,18)` in Postgres. `@bagseven/money` is the only arithmetic allowed.
 
 ## D11. Events
 
-Domain events go to a transactional outbox in the same DB transaction as the state change, then drained to the bus. Correctness never depends on the bus being up. Topic registry in `@agentos/events`.
+Domain events go to a transactional outbox in the same DB transaction as the state change, then drained to the bus. Correctness never depends on the bus being up. Topic registry in `@bagseven/events`.
 
 ## D12. Receipts
 

@@ -1,16 +1,16 @@
-import { createDb } from '@agentos/db';
+import { createDb } from '@bagseven/db';
 import { Redis } from 'ioredis';
-import { createService } from '@agentos/server';
+import { createService } from '@bagseven/server';
 import { buildPolicyRoutes } from './routes.js';
 
 async function main(): Promise<void> {
   const db = createDb({
-    connectionString: process.env.DATABASE_URL ?? 'postgres://agentos:agentos@localhost:5432/agentos',
+    connectionString: process.env.DATABASE_URL ?? 'postgres://bagseven:bagseven@localhost:5432/bagseven',
   });
   const redis = new Redis(process.env.REDIS_URL ?? 'redis://localhost:6379');
 
   await createService({
-    name: 'policy',
+    name: 'bagseven-policy',
     port: Number(process.env.POLICY_PORT ?? 4003),
     db,
     redis,

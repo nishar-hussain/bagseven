@@ -1,4 +1,4 @@
-AgentOS — AI Agent Economy Platform
+Bagseven — AI Agent Economy Platform
 Full End-to-End Product Requirements Document (PRD)
 Version: 1.0 · Status: Draft for build · Owner: You (Founder/Tech Lead) · Last updated: Sept 18, 2026
 
@@ -12,13 +12,13 @@ Only move to the next slice once it's stable
 Nothing in this PRD assumes you build all five subsystems at once. Sections 1–11 describe the end state — the full architecture, data model, and tech stack. Section 12 is the actual execution plan, broken into ~20 small pieces across 5 phases.
 
 1. Executive Summary
-AgentOS is infrastructure — not an app — for autonomous AI agents to operate in an economy: to have a verifiable identity, hold and spend money under hard-coded limits, discover and pay for tools and data, transact with other agents, and improve themselves over time, all while a human stays in ultimate control.
+Bagseven is infrastructure — not an app — for autonomous AI agents to operate in an economy: to have a verifiable identity, hold and spend money under hard-coded limits, discover and pay for tools and data, transact with other agents, and improve themselves over time, all while a human stays in ultimate control.
 
 It is the synthesis of five separate hackathon-stage concepts into one coherent platform, organized as five subsystems (not five merged codebases):
 
 #	Subsystem	Originating idea	Core question it answers
 1	Identity & Registry	Novi Corpus	Who is this agent, and who is accountable for it?
-2	Policy & Treasury	Cordon	What is this agent allowed to spend, and on what?
+2	Policy & Treasury	Bagseven	What is this agent allowed to spend, and on what?
 3	Tool Marketplace	OnchainRouter	What actions/tools can this agent call?
 4	Data Marketplace	OpenBook	What information can this agent buy, under what guarantee of freshness/accuracy?
 5	Evolution Engine	Petri	How does this agent get measurably better over time?
@@ -43,14 +43,14 @@ A safe, sandboxed way to evaluate and roll out improved versions of an agent wit
 Handle production-scale traffic (see §11) without the policy/treasury layer becoming the bottleneck.
 Non-goals (explicitly out of scope for v1):
 
-Building a general-purpose LLM or agent framework — AgentOS is infrastructure around agents, not the agent brain itself. Bring your own model/framework (LangGraph, custom, etc.); AgentOS exposes an SDK it talks to.
-Being a full custodial bank — AgentOS orchestrates policy and settlement; a licensed custodian/PSP or a non-custodial smart-contract wallet holds actual fiat/custody risk.
-Running your own L1 — AgentOS settles on existing chains via existing rails (see §7.3), it does not build new blockchain infrastructure.
+Building a general-purpose LLM or agent framework — Bagseven is infrastructure around agents, not the agent brain itself. Bring your own model/framework (LangGraph, custom, etc.); Bagseven exposes an SDK it talks to.
+Being a full custodial bank — Bagseven orchestrates policy and settlement; a licensed custodian/PSP or a non-custodial smart-contract wallet holds actual fiat/custody risk.
+Running your own L1 — Bagseven settles on existing chains via existing rails (see §7.3), it does not build new blockchain infrastructure.
 4. Personas
 Agent Developer — builds an agent (e.g., a DeFi treasury bot, a research assistant) and wants identity, budget control, and marketplace access without building all of this themselves.
 Guardian / Org Admin — a human or company legally responsible for an agent; sets policy, approves large transactions, can freeze an agent.
 Tool/Data Provider — lists a paid API or dataset on the marketplace; wants metering, payment guarantees, and SLA enforcement (get paid only if data was fresh/correct).
-Platform Operator (you) — runs AgentOS itself; needs observability, abuse prevention, and a billing model (small platform fee, or freemium + usage-based).
+Platform Operator (you) — runs Bagseven itself; needs observability, abuse prevention, and a billing model (small platform fee, or freemium + usage-based).
 5. Core Concepts & Glossary
 Term	Meaning
 Agent	A registered identity + wallet + policy bundle that an LLM-driven runtime acts on behalf of.
@@ -62,7 +62,7 @@ Dataset / Data Service	A paid, conditional information product with a defined fr
 Receipt	A signed, immutable record of an executed, paid action — the audit trail unit.
 Candidate	An experimental new version of an agent's harness/prompt/policy produced by the Evolution Engine, not yet promoted to production.
 x402	Open HTTP-native micropayment protocol (HTTP 402 revived) used for per-call tool/data payment. Now governed by the Linux Foundation (moved April 2026), with V2 adding multi-chain support and reusable payment sessions — the natural payment rail for this platform.
-ERC-8004	Ethereum's "Trustless Agents" standard (Identity/Reputation/Validation on-chain registries), live on mainnet since Jan 2026, still evolving toward v2. AgentOS's Identity subsystem should be compatible with, not a replacement for, this standard so agents are portable outside your platform.
+ERC-8004	Ethereum's "Trustless Agents" standard (Identity/Reputation/Validation on-chain registries), live on mainnet since Jan 2026, still evolving toward v2. Bagseven's Identity subsystem should be compatible with, not a replacement for, this standard so agents are portable outside your platform.
 6. System Architecture (Target End-State)
 6.1 High-level component diagram
 Marketplace Plane
@@ -81,7 +81,7 @@ Identity & Registry Service
 (Novi layer)
 
 Policy & Treasury Service
-(Cordon layer)
+(Bagseven daemon layer)
 
 Agent Runtime
 (Planner / Executor, customer-owned)

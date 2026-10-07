@@ -361,7 +361,12 @@ export function MandateSection(props: SectionProps) {
   const fund = () =>
     run('fund vault', async () => {
       if (!session.mandate) throw new Error('sign a mandate first');
-      const res = await client.fundVault(session.mandate.mandate_id, fundAmt);
+      if (!owner) throw new Error('connect your wallet first');
+      // Funding is an owner-wallet action: approve the configured USDC token
+      // and call the mandate contract directly. The helper waits for both
+      // receipts before we read the new vault balance.
+      await fundFromContract(session.mandate.contract_address, fundAmt);
+      const res = await client.getVault(session.mandate.mandate_id);
       persist({ ...session, vaultBalance: res.vault_balance });
       toast('ok', `Vault funded — balance $${res.vault_balance}`);
     });

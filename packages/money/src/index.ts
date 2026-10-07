@@ -3,7 +3,7 @@ import { Decimal } from 'decimal.js';
 Decimal.set({ precision: 38 });
 
 /**
- * AgentOS never uses floating point for money.
+ * Bagseven never uses floating point for money.
  * All monetary values are canonical decimal strings with at most 18 fractional digits,
  * matching the NUMERIC(38,18) columns in PostgreSQL.
  */

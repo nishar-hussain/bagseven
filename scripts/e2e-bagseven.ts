@@ -11,7 +11,7 @@
  */
 import { readFileSync } from 'node:fs';
 import { signMessage, privateKeyToAccount, parseUnits } from 'viem/accounts';
-import { canonicalMandate, canonicalSpawn, canonicalWithdraw, recoverEip191, recoverSpendIntentSigner, spendIntentTypes, spendIntentDomain } from '@agentos/onchain';
+import { canonicalMandate, canonicalSpawn, canonicalWithdraw, recoverEip191, recoverSpendIntentSigner, spendIntentTypes, spendIntentDomain } from '@bagseven/onchain';
 
 const env = Object.fromEntries(
   readFileSync('.env', 'utf8').split('\n').filter((l) => l && !l.startsWith('#')).map((l) => {
