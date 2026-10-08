@@ -85,6 +85,7 @@ The repository includes an isolated MCP client and signed mock paid provider. Th
 ```bash
 pnpm demo:setup                         # create a demo mandate; funding is skipped by default
 pnpm --filter @bagseven/demo-provider dev
+pnpm demo:register-provider              # requires PROVIDER_ADMIN_TOKEN
 BAGSEVEN_MCP_WORKER=<root_agent_id> pnpm bagseven-mcp
 BAGSEVEN_MCP_URL=http://127.0.0.1:4009/v1/mcp pnpm demo:agent
 ```

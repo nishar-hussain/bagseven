@@ -5,8 +5,8 @@ import { z } from 'zod';
 import { encodeBase64, parsePaymentResponse, type PaymentChallenge } from './protocol.js';
 
 export function buildDemoProvider(config: NodeJS.ProcessEnv = process.env): { app: FastifyInstance; address: string; recipient: string } {
-  const providerKey = config.DEMO_PROVIDER_KEY as `0x${string}` | undefined;
-  if (!providerKey) throw new Error('DEMO_PROVIDER_KEY is required');
+  const providerKey = (config.DEMO_PROVIDER_KEY ?? config.DEMO_OPERATOR_KEY ?? config.OPERATOR_DEV_KEY) as `0x${string}` | undefined;
+  if (!providerKey) throw new Error('Set DEMO_PROVIDER_KEY (or DEMO_OPERATOR_KEY/OPERATOR_DEV_KEY for local demo mode) before starting the demo provider');
   const account = privateKeyToAccount(providerKey);
   const recipient = (config.DEMO_PROVIDER_RECIPIENT ?? account.address) as `0x${string}`;
   const providerHost = config.DEMO_PROVIDER_HOST ?? '127.0.0.1';
@@ -18,7 +18,7 @@ export function buildDemoProvider(config: NodeJS.ProcessEnv = process.env): { ap
   app.get('/healthz', async () => ({ ok: true, service: 'bagseven-demo-provider', address: account.address }));
   app.get('/:resource', async (req, reply) => {
     const { resource } = z.object({ resource: z.enum(['weather', 'research', 'market-data']) }).parse(req.params);
-    const challenge: PaymentChallenge = { provider: providerHost, amount: price, recipient, chain, token, nonce: createHash('sha256').update(`${resource}:${Date.now()}:${Math.random()}`).digest('hex'), expires_at: Math.floor(Date.now() / 1000) + 120 };
+    const challenge: PaymentChallenge = { provider: req.hostname || providerHost, amount: price, recipient, chain, token, nonce: createHash('sha256').update(`${resource}:${Date.now()}:${Math.random()}`).digest('hex'), expires_at: Math.floor(Date.now() / 1000) + 120 };
     const canonical = ['bagseven-payment-v1', challenge.provider, challenge.amount, challenge.recipient.toLowerCase(), challenge.chain, challenge.token.toLowerCase(), challenge.nonce, challenge.expires_at].join('|');
     challenge.signature = await account.signMessage({ message: canonical });
     const payment = req.headers['x-payment-response'] ?? req.headers['x-payment'];
@@ -39,6 +39,11 @@ export function buildDemoProvider(config: NodeJS.ProcessEnv = process.env): { ap
 if (import.meta.url === `file://${process.argv[1]}`) {
   const port = Number(process.env.DEMO_PROVIDER_PORT ?? 4007);
   const provider = buildDemoProvider();
-  await provider.app.listen({ port, host: '0.0.0.0' });
-  provider.app.log.info({ address: provider.address, recipient: provider.recipient, port }, 'demo provider listening');
+  try {
+    await provider.app.listen({ port, host: '0.0.0.0' });
+    provider.app.log.info({ address: provider.address, recipient: provider.recipient, port }, 'demo provider listening');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'EADDRINUSE') throw new Error(`Demo provider port ${port} is already in use. Stop the old demo provider or set DEMO_PROVIDER_PORT to another port.`);
+    throw error;
+  }
 }

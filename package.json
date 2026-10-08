@@ -14,6 +14,7 @@
     "demo:provider": "pnpm --filter @bagseven/demo-provider start",
     "demo:setup": "tsx scripts/demo-agent-setup.ts",
     "demo:check": "tsx scripts/demo-agent-check.ts",
+    "demo:register-provider": "tsx scripts/demo-register-provider.ts",
     "build": "turbo run build",
     "dev": "turbo run dev --concurrency=20",
     "lint": "turbo run lint",
