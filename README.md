@@ -142,6 +142,18 @@ POST /v1/tools/:id/execute  (marketplace-tools)
 - **PayTo binding (2.6):** the settlement goes to the provider's *registered* payout address, never a challenge-supplied one; a mismatch aborts the payment *before any signature*.
 - **MCP:** `http://localhost:4009/v1/mcp` exposes Bagseven control tools to any MCP-compatible agent framework (`tools/list`, `tools/call`).
 
+## AI Research Buyer demo
+
+The isolated research demo lets a user ask a natural-language research question. The agent searches a local research marketplace, requests a paid report through the worker-bound MCP, and summarizes the result. The UI also includes a blocked premium-purchase scenario so mandate enforcement is visible.
+
+Run the existing database, policy, daemon, and worker-bound MCP first. Then start the provider and demo UI together:
+
+```bash
+pnpm demo:research
+```
+
+Open `http://localhost:4020`, enter a research question, and select either **Run approved research** or **Try blocked purchase**. Configure `OPENAI_API_KEY` for an LLM-generated summary; without it, the demo uses a deterministic local summary while preserving the real MCP/payment flow.
+
 Verify end-to-end (against whatever `SEPOLIA_RPC_URL` points at):
 ```bash
 pnpm exec tsx scripts/e2e-phase2.ts

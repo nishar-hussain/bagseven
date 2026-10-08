@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Bagseven Research Buyer</title>
+  <style>
+    :root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, sans-serif; background:#0b1020; color:#e8ecf4; }
+    body { margin:0; background:radial-gradient(circle at 80% 0%,#1a2753,transparent 38%),#0b1020; min-height:100vh; }
+    main { max-width:1120px; margin:auto; padding:42px 24px 70px; }
+    .eyebrow { color:#7dd3fc; font-size:12px; letter-spacing:.14em; text-transform:uppercase; font-weight:700; }
+    h1 { font-size:clamp(34px,6vw,64px); line-height:1; margin:12px 0 18px; max-width:760px; }
+    .lede { color:#a9b5ce; font-size:18px; max-width:700px; line-height:1.55; }
+    .grid { display:grid; grid-template-columns:1.2fr .8fr; gap:18px; margin-top:32px; }
+    .card { background:rgba(18,27,52,.84); border:1px solid #27375d; border-radius:18px; padding:22px; box-shadow:0 16px 40px #05081455; }
+    label { display:block; color:#a9b5ce; font-size:13px; margin-bottom:8px; }
+    textarea { width:100%; box-sizing:border-box; min-height:125px; resize:vertical; border-radius:12px; border:1px solid #3a4b76; background:#0a1124; color:#f7f9ff; padding:15px; font:inherit; font-size:16px; }
+    button { border:0; border-radius:10px; padding:12px 16px; font-weight:700; cursor:pointer; background:#7dd3fc; color:#07101f; margin:12px 8px 0 0; }
+    button.secondary { background:#263657; color:#e8ecf4; }
+    .metric { display:flex; justify-content:space-between; padding:12px 0; border-bottom:1px solid #263657; color:#a9b5ce; }
+    .metric strong { color:#f7f9ff; }
+    #timeline { min-height:120px; margin-top:18px; }
+    .event { border-left:2px solid #38bdf8; padding:7px 0 7px 14px; margin:10px 0; }
+    .event small { display:block; color:#7082a8; font-size:11px; margin-bottom:3px; }
+    .event.refused { border-color:#fb7185; } .event.done { border-color:#4ade80; }
+    #summary { white-space:pre-wrap; line-height:1.65; color:#dbe7ff; }
+    .muted { color:#7f91b7; } .pill { display:inline-block; border-radius:999px; padding:4px 9px; background:#24365e; color:#bde8ff; font-size:12px; }
+    @media (max-width:800px) { .grid { grid-template-columns:1fr; } main { padding:28px 16px; } }
+  </style>
+</head>
+<body><main>
+  <div class="eyebrow">Bagseven controlled AI spending</div>
+  <h1>Research Buyer</h1>
+  <p class="lede">Ask an AI research agent a question. It can buy approved data through Bagseven MCP, but it cannot bypass the worker mandate or spend beyond its limits.</p>
+  <div class="grid">
+    <section class="card">
+      <label for="question">Research question</label>
+      <textarea id="question">Research the electric vehicle battery market and summarize the three most important trends.</textarea>
+      <div><button id="run">Run approved research</button><button id="blocked" class="secondary">Try blocked purchase</button></div>
+      <div id="timeline"><p class="muted">Your agent activity will appear here.</p></div>
+    </section>
+    <aside class="card">
+      <span class="pill">Worker-bound agent</span>
+      <div class="metric"><span>Mandate</span><strong id="mandate">Waiting</strong></div>
+      <div class="metric"><span>Per purchase</span><strong>$1.00</strong></div>
+      <div class="metric"><span>Demo resource</span><strong>$0.10</strong></div>
+      <div class="metric"><span>Premium resource</span><strong>$5.00</strong></div>
+      <h3>Agent answer</h3><div id="summary" class="muted">No answer yet.</div>
+    </aside>
+  </div>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+let timer;
+function draw(run) {
+  $('mandate').textContent = run.status === 'running' ? 'Checking…' : run.status === 'refused' ? 'Purchase refused' : run.status === 'completed' ? 'Payment approved' : 'Error';
+  $('timeline').innerHTML = run.events.map((e) => `<div class="event ${e.type.includes('refus') ? 'refused' : e.type.includes('summary') ? 'done' : ''}"><small>${new Date(e.at).toLocaleTimeString()} · ${e.type}</small>${e.message}</div>`).join('');
+  if (run.summary) $('summary').textContent = run.summary;
+  if (run.error) $('summary').textContent = run.error;
+}
+async function start(scenario) {
+  clearInterval(timer); $('summary').textContent = 'Agent is working…';
+  const response = await fetch('/api/research', { method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({ question:$('question').value, scenario }) });
+  const { run_id } = await response.json();
+  timer = setInterval(async () => { const run = await fetch('/api/runs/' + run_id).then((r) => r.json()); draw(run); if (run.status !== 'running') clearInterval(timer); }, 350);
+}
+$('run').onclick = () => start('approved'); $('blocked').onclick = () => start('blocked');
+</script></body></html>

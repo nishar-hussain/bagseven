@@ -22,6 +22,7 @@ try {
 
 const DAEMON = process.env.DAEMON_URL ?? 'http://localhost:4001';
 const WORKER = process.env.BAGSEVEN_MCP_WORKER;
+const RESEARCH_PROVIDER = process.env.RESEARCH_PROVIDER_URL ?? 'http://127.0.0.1:4010';
 
 async function daemon(method: string, path: string, body?: unknown): Promise<unknown> {
   const headers: Record<string, string> = {};
@@ -55,6 +56,22 @@ function buildServer(): McpServer {
       inputSchema: {},
     },
     async () => text(await daemon('POST', `/internal/workers/${encodeURIComponent(WORKER)}/status`)),
+  );
+
+  server.registerTool(
+    'bagseven_search',
+    {
+      title: 'Bagseven research search',
+      description: 'Search research providers available to this Bagseven agent.',
+      inputSchema: { query: z.string().min(1).max(500) },
+    },
+    async ({ query }) => {
+      const response = await fetch(`${RESEARCH_PROVIDER}/v1/providers`);
+      if (!response.ok) throw new Error(`research provider search failed (${response.status})`);
+      const catalog = await response.json() as { providers?: Array<{ resources?: Array<{ id: string; title: string; category: string; price: string; provider: string; free: boolean; summary: string }> }> };
+      const resources = (catalog.providers ?? []).flatMap((provider) => provider.resources ?? []).filter((resource) => `${resource.title} ${resource.category} ${resource.summary}`.toLowerCase().includes(query.toLowerCase()) || query.toLowerCase().includes('electric vehicle'));
+      return text({ query, resources });
+    },
   );
 
   server.registerTool(
@@ -99,6 +116,7 @@ async function main(): Promise<void> {
     const app = express();
     app.use(express.json());
     const transports = new Map<string, InstanceType<typeof StreamableHTTPServerTransport>>();
+    app.get('/v1/mcp', (_req, res) => res.json({ ok: true, service: 'bagseven-mcp', worker: WORKER }));
     app.post('/v1/mcp', async (req, res) => {
       if (process.env.MCP_AUTH_TOKEN && req.headers.authorization !== `Bearer ${process.env.MCP_AUTH_TOKEN}`) {
         res.status(401).json({ error: 'unauthorized' });
