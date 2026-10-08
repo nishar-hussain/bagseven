@@ -36,6 +36,7 @@ const card = 'bg-white rounded-2xl border border-neutral-200/80 p-6 shadow-[0_1p
 const input = 'w-full border border-neutral-200 rounded-xl px-3 py-2 text-sm text-neutral-900 outline-none bg-white focus:ring-2 focus:ring-neutral-900/10';
 const btn = 'px-5 py-2 rounded-full text-sm font-medium text-white bg-gradient-to-r from-[#9855b9] to-[#c24285] hover:opacity-90 transition-opacity disabled:opacity-50 cursor-pointer';
 const btnGhost = 'px-5 py-2 rounded-full text-sm font-medium text-neutral-700 border border-neutral-200/90 bg-white hover:bg-neutral-50 transition disabled:opacity-50 cursor-pointer';
+const agentRows = (value: unknown): Session['tree'] => (Array.isArray(value) ? value as Session['tree'] : []);
 
 export function OverviewSection(props: SectionProps) {
   const { session, client, busy, persist, run, toast, onNavigate, onNewMandate } = props;
@@ -55,7 +56,7 @@ export function OverviewSection(props: SectionProps) {
       if (!session.mandate) throw new Error('sign a mandate first');
       const overview = await client.mandateOverview(session.mandate.mandate_id);
       setO(overview);
-      persist({ ...session, tree: (overview.agents as Session['tree']) ?? [], vaultBalance: overview.vault_available as string });
+      persist({ ...session, tree: agentRows(overview.agents), vaultBalance: overview.vault_available as string });
       toast('ok', 'Refreshed');
     });
 
@@ -529,7 +530,7 @@ export function AgentsSection(props: SectionProps) {
   const { address: wagmiAddress } = useAccount();
   const owner = wagmiAddress ?? session.ownerAddress;
   type Agent = { id: string; operator_address: string; share_percent: string; depth: number; status: string; parent_agent_id?: string | null; name?: string | null; mcp_endpoint?: string | null };
-  const [tree, setTree] = useState<Agent[]>([]);
+  const [tree, setTree] = useState<Agent[]>(() => (session.tree ?? []) as Agent[]);
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<'all' | 'live' | 'held' | 'revoked'>('all');
   const [view, setView] = useState<'list' | 'tree'>('list');
@@ -554,7 +555,8 @@ export function AgentsSection(props: SectionProps) {
     run('load agents', async () => {
       if (!session.mandate) throw new Error('sign a mandate first');
       const overview = await client.mandateOverview(session.mandate.mandate_id);
-      const agents = (overview.agents as Agent[] | undefined) ?? [];
+      const remoteAgents = agentRows(overview.agents) as Agent[];
+      const agents = remoteAgents.length > 0 ? remoteAgents : (session.tree ?? []) as Agent[];
       setTree(agents);
       persist({ ...session, tree: agents });
     });
@@ -562,6 +564,10 @@ export function AgentsSection(props: SectionProps) {
   useEffect(() => {
     if (session.mandate) load();
   }, [session.mandate?.mandate_id]);
+
+  useEffect(() => {
+    if (tree.length === 0 && session.tree && session.tree.length > 0) setTree(session.tree as Agent[]);
+  }, [session.tree]);
 
   const spawn = () =>
     run('spawn agent', async () => {
@@ -657,7 +663,10 @@ export function AgentsSection(props: SectionProps) {
           <h1 className="text-[24px] font-bold text-neutral-900 tracking-tight leading-tight">Agents</h1>
           <p className="text-[13px] text-neutral-500 mt-1">Every agent under this mandate. Each purchase is charged to the agent and every agent above it.</p>
         </div>
-        <button onClick={() => setSpawnOpen(true)} className={btn}>Spawn agent</button>
+        <div className="flex gap-2">
+          <button onClick={() => load()} disabled={busy !== null} className={btnGhost}>Refresh</button>
+          <button onClick={() => setSpawnOpen(true)} className={btn}>Spawn agent</button>
+        </div>
       </div>
 
       <div className="flex items-start gap-5">
@@ -708,7 +717,7 @@ export function AgentsSection(props: SectionProps) {
                 ))}
               </tbody>
             </table>
-            {filtered.length === 0 && <p className="py-8 text-center text-sm text-neutral-500">No agents{filter !== 'all' ? ` (${filter})` : ''}.</p>}
+            {filtered.length === 0 && <div className="py-8 text-center text-sm text-neutral-500"><p>No agents{filter !== 'all' ? ` (${filter})` : ''}.</p><button onClick={() => load()} className="mt-2 text-xs text-neutral-700 underline">Reload agents</button></div>}
           </div>
         ) : (
           <div className="mt-4 space-y-1.5">
@@ -719,7 +728,7 @@ export function AgentsSection(props: SectionProps) {
                 <span className="text-xs font-mono text-neutral-500">${money(windowCap(a))}/window</span>
               </div>
             ))}
-            {filtered.length === 0 && <p className="py-8 text-center text-sm text-neutral-500">No agents.</p>}
+            {filtered.length === 0 && <div className="py-8 text-center text-sm text-neutral-500"><p>No agents.</p><button onClick={() => load()} className="mt-2 text-xs text-neutral-700 underline">Reload agents</button></div>}
           </div>
         )}
       </div>
