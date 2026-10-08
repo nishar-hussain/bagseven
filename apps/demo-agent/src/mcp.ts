@@ -11,7 +11,11 @@ export async function connectMcp(url: string, authToken?: string): Promise<Agent
     requestInit: authToken ? { headers: { authorization: `Bearer ${authToken}` } } : undefined,
   });
   const client = new Client({ name: 'bagseven-demo-agent', version: '0.1.0' }, { capabilities: {} });
-  await client.connect(transport);
+  try {
+    await client.connect(transport);
+  } catch (error) {
+    throw new Error(`Unable to connect to Bagseven MCP at ${url}. Start MCP with BAGSEVEN_MCP_WORKER=<worker-id> and BAGSEVEN_MCP_PORT=4009. ${(error as Error).message}`, { cause: error });
+  }
   return { client, transport };
 }
 

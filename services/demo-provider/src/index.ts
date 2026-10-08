@@ -43,7 +43,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     await provider.app.listen({ port, host: '0.0.0.0' });
     provider.app.log.info({ address: provider.address, recipient: provider.recipient, port }, 'demo provider listening');
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'EADDRINUSE') throw new Error(`Demo provider port ${port} is already in use. Stop the old demo provider or set DEMO_PROVIDER_PORT to another port.`);
+    if ((error as NodeJS.ErrnoException).code === 'EADDRINUSE') throw new Error(`Demo provider port ${port} is already in use. Stop the old demo provider or set DEMO_PROVIDER_PORT to another port.`, { cause: error });
     throw error;
   }
 }
