@@ -78,36 +78,6 @@ Each MCP process is bound to exactly one worker. Set `BAGSEVEN_MCP_WORKER` befor
 
 For durable registration, an administrator can call `POST /v1/providers` with `PROVIDER_ADMIN_TOKEN`; the daemon resolves registered providers through `GET /v1/providers/:hostname` when they are not present in the local configuration.
 
-## Demo AI agent
-
-The repository includes an isolated MCP client and signed mock paid provider. The demo agent discovers Bagseven tools, reads the bound worker status, requests a paid resource, and prints the payment/provider result.
-
-For the guided local demo, start Docker/Postgres/Redis and put local Anvil/test keys in `.env`, then run:
-
-```bash
-pnpm demo
-```
-
-This starts or reuses the provider, policy service, daemon, and worker-bound MCP; creates a demo mandate; and runs both an allowed `$0.10` provider request and a deliberately refused request. The output is a live event timeline. Funding remains opt-in through `DEMO_ALLOW_FUNDING=true` and `DEMO_SETUP_FUND_AMOUNT`.
-
-To clear only the runner's local state:
-
-```bash
-pnpm demo:reset
-```
-
-The reset command does not delete application records or funds.
-
-```bash
-pnpm demo:setup                         # create a demo mandate; funding is skipped by default
-pnpm --filter @bagseven/demo-provider dev
-pnpm demo:register-provider              # requires PROVIDER_ADMIN_TOKEN
-BAGSEVEN_MCP_WORKER=<root_agent_id> pnpm bagseven-mcp
-BAGSEVEN_MCP_URL=http://127.0.0.1:4009/v1/mcp pnpm demo:agent
-```
-
-Use only local Anvil/test keys for the demo. To fund a local demo vault explicitly, set `DEMO_ALLOW_FUNDING=true` and `DEMO_SETUP_FUND_AMOUNT`; the setup command never funds by default.
-
 ## Console
 
 The browser UI at **http://localhost:3000** walks the full Phase-1 flow in five steps:
