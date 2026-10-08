@@ -19,7 +19,6 @@ services/             # independently deployable services
   verification/       # append-only receipts, hash chain
   marketplace-tools/  # tool registry, discovery, x402-gated execution, MCP (Phase 2)
   payments/           # x402 orchestration (the 402 → pay → retry dance)
-  demo-provider/      # dev-only x402 provider for local testing
   (marketplace-data, directory, evolution)  # later phases
 packages/             # shared libraries
   db, money, auth, config, events, server, sdk, testing
@@ -142,7 +141,6 @@ POST /v1/tools/:id/execute  (marketplace-tools)
 - **Providers** register (`pending`) then get approved (`active`); tools carry a price, category, and endpoint. Discovery: `GET /v1/tools?category=&max_price=`.
 - **PayTo binding (2.6):** the settlement goes to the provider's *registered* payout address, never a challenge-supplied one; a mismatch aborts the payment *before any signature*.
 - **MCP:** `http://localhost:4009/v1/mcp` exposes Bagseven control tools to any MCP-compatible agent framework (`tools/list`, `tools/call`).
-- **Demo provider:** `services/demo-provider` returns 402-without-payment and 200-with-payment (verifying the tx on-chain), so the whole flow is testable locally.
 
 Verify end-to-end (against whatever `SEPOLIA_RPC_URL` points at):
 ```bash
