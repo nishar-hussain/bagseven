@@ -82,6 +82,22 @@ For durable registration, an administrator can call `POST /v1/providers` with `P
 
 The repository includes an isolated MCP client and signed mock paid provider. The demo agent discovers Bagseven tools, reads the bound worker status, requests a paid resource, and prints the payment/provider result.
 
+For the guided local demo, start Docker/Postgres/Redis and put local Anvil/test keys in `.env`, then run:
+
+```bash
+pnpm demo
+```
+
+This starts or reuses the provider, policy service, daemon, and worker-bound MCP; creates a demo mandate; and runs both an allowed `$0.10` provider request and a deliberately refused request. The output is a live event timeline. Funding remains opt-in through `DEMO_ALLOW_FUNDING=true` and `DEMO_SETUP_FUND_AMOUNT`.
+
+To clear only the runner's local state:
+
+```bash
+pnpm demo:reset
+```
+
+The reset command does not delete application records or funds.
+
 ```bash
 pnpm demo:setup                         # create a demo mandate; funding is skipped by default
 pnpm --filter @bagseven/demo-provider dev
