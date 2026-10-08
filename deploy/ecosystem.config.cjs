@@ -14,5 +14,7 @@ module.exports = {
     { name: 'policy', cwd: './services/policy', script: 'node', args: '--env-file-if-exists=../../.env dist/index.js', autorestart: true, max_restarts: 20, time: true },
     { name: 'console', cwd: './apps/console', script: 'node', args: 'node_modules/next/dist/bin/next start -p 3000', autorestart: true, max_restarts: 20, time: true },
     { name: 'bagseven-mcp', cwd: '.', script: 'pnpm', args: 'bagseven-mcp', autorestart: true, max_restarts: 20, time: true },
+    { name: 'bagseven-demo-provider', cwd: './services/demo-provider', script: 'node', args: '--env-file-if-exists=../../.env dist/index.js', autorestart: true, max_restarts: 20, time: true, env: { DEMO_PROVIDER_PORT: 4007 } },
+    { name: 'bagseven-demo-agent', cwd: './apps/demo-agent', script: 'node', args: '--env-file-if-exists=../../.env dist/index.js', autorestart: false, time: true },
   ],
 };
