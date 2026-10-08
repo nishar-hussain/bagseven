@@ -10,6 +10,9 @@
   "scripts": {
     "bagseven-mcp": "tsx scripts/bagseven-mcp.ts",
     "bagseven-daemon": "pnpm --filter @bagseven/daemon start",
+    "demo:agent": "pnpm --filter @bagseven/demo-agent start",
+    "demo:provider": "pnpm --filter @bagseven/demo-provider start",
+    "demo:setup": "tsx scripts/demo-agent-setup.ts",
     "build": "turbo run build",
     "dev": "turbo run dev --concurrency=20",
     "lint": "turbo run lint",
