@@ -13,7 +13,7 @@ export function encodeBase64(value: string): string {
   return Buffer.from(value, 'utf8').toString('base64');
 }
 
-export function parsePaymentResponse(value: string): { amount?: string; recipient?: string; tx_hash?: string } {
-  try { return JSON.parse(value) as { amount?: string; recipient?: string; tx_hash?: string }; }
+export function parsePaymentResponse(value: string): { amount?: string; recipient?: string; tx_hash?: string; nonce?: string } {
+  try { return JSON.parse(value) as { amount?: string; recipient?: string; tx_hash?: string; nonce?: string }; }
   catch { throw new Error('invalid payment response'); }
 }
