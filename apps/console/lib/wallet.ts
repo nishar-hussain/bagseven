@@ -6,6 +6,10 @@ import {
   signTypedData as coreSignTypedData,
   sendTransaction as coreSendTransaction,
   waitForTransactionReceipt,
+  getAccount,
+  getChainId,
+  getPublicClient,
+  switchChain,
 } from '@wagmi/core';
 import { BagMandateAbi, canonicalMandate, canonicalSpawn, canonicalWithdraw, spendIntentDomain, spendIntentTypes, type SpendIntent } from '@bagseven/onchain';
 import { wagmiConfig } from './wagmi';
@@ -25,6 +29,31 @@ const erc20ApproveAbi = [
     stateMutability: 'nonpayable' as const,
   },
 ];
+
+const erc20BalanceAbi = [
+  {
+    type: 'function' as const,
+    name: 'balanceOf' as const,
+    inputs: [{ name: 'account', type: 'address' as const }],
+    outputs: [{ name: 'balance', type: 'uint256' as const }],
+    stateMutability: 'view' as const,
+  },
+];
+
+async function prepareAmoyFunding(contract: string, units: bigint): Promise<void> {
+  const account = getAccount(wagmiConfig);
+  if (!account.address) throw new Error('connect the wallet before funding the vault');
+  if (getChainId(wagmiConfig) !== CHAIN_ID) {
+    try { await switchChain(wagmiConfig, { chainId: CHAIN_ID as 80002 }); }
+    catch { throw new Error('switch the connected wallet to Polygon Amoy before funding the vault'); }
+  }
+  const publicClient = await getPublicClient(wagmiConfig);
+  if (!publicClient) throw new Error('Polygon Amoy RPC is unavailable');
+  const code = await publicClient.getBytecode({ address: contract as `0x${string}` });
+  if (!code) throw new Error('this mandate contract is not deployed on Polygon Amoy; create a new Amoy mandate');
+  const balance = BigInt(await publicClient.readContract({ address: USDC_ADDRESS, abi: erc20BalanceAbi, functionName: 'balanceOf', args: [account.address] }) as unknown as bigint);
+  if (balance < units) throw new Error(`insufficient Polygon Amoy USDC: wallet has ${(Number(balance) / 1e6).toFixed(2)}, funding requires ${(Number(units) / 1e6).toFixed(2)}`);
+}
 
 export function shortAddress(a: string): string {
   return a ? `${a.slice(0, 6)}…${a.slice(-4)}` : '';
@@ -55,6 +84,8 @@ export async function withdrawFromContract(contract: string, amountUsdc: string,
  */
 export async function fundFromContract(contract: string, amountUsdc: string): Promise<string> {
   const units = BigInt(Math.round(Number(amountUsdc) * 1e6));
+  if (units <= 0n) throw new Error('funding amount must be greater than zero');
+  await prepareAmoyFunding(contract, units);
   const approveData = encodeFunctionData({ abi: erc20ApproveAbi, functionName: 'approve', args: [contract.toLowerCase(), units] });
   const approveHash = await coreSendTransaction(wagmiConfig, { to: USDC_ADDRESS, data: approveData });
   // The mandate's fund() call uses transferFrom(). Wait for the approval to be
