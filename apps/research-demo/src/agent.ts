@@ -17,10 +17,10 @@ interface OpenRouterMessage { role: 'system' | 'user' | 'assistant' | 'tool'; co
 interface ToolDefinition { type: 'function'; function: { name: string; description?: string; parameters: unknown } }
 
 async function callModel(messages: OpenRouterMessage[], tools: ToolDefinition[], config: NodeJS.ProcessEnv): Promise<OpenRouterMessage> {
-  const apiKey = config.OPENCODE_API_KEY ?? config.OPENAI_API_KEY;
-  if (!apiKey) throw new Error('OPENCODE_API_KEY is required; mock/fallback mode is disabled');
-  const base = config.OPENCODE_BASE_URL ?? config.OPENAI_BASE_URL ?? 'https://opencode.ai/zen/v1';
-  const model = config.OPENCODE_MODEL ?? config.OPENAI_MODEL ?? 'nemotron-3-ultra-free';
+  const apiKey = config.CLINE_API_KEY ?? config.OPENCODE_API_KEY ?? config.OPENAI_API_KEY;
+  if (!apiKey) throw new Error('CLINE_API_KEY is required; mock/fallback mode is disabled');
+  const base = config.CLINE_BASE_URL ?? config.OPENCODE_BASE_URL ?? config.OPENAI_BASE_URL ?? 'https://api.cline.bot/api/v1';
+  const model = config.CLINE_MODEL ?? config.OPENCODE_MODEL ?? config.OPENAI_MODEL ?? 'minimax/minimax-m2.5';
   const response = await fetch(`${base.replace(/\/$/, '')}/chat/completions`, {
     method: 'POST',
     headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' },
@@ -35,7 +35,7 @@ async function callModel(messages: OpenRouterMessage[], tools: ToolDefinition[],
 }
 
 export async function runResearch({ question, scenario, emit, config = process.env }: ResearchRunOptions): Promise<{ summary: string; result: unknown; status: 'completed' | 'refused' }> {
-  if (!(config.OPENCODE_API_KEY ?? config.OPENAI_API_KEY)) throw new Error('OPENCODE_API_KEY is required; configure a real OpenCode model before running the agent');
+  if (!(config.CLINE_API_KEY ?? config.OPENCODE_API_KEY ?? config.OPENAI_API_KEY)) throw new Error('CLINE_API_KEY is required; configure a real Cline model before running the agent');
   const mcpUrl = config.BAGSEVEN_MCP_URL ?? 'http://127.0.0.1:4009/v1/mcp';
   const transport = new StreamableHTTPClientTransport(new URL(mcpUrl), { requestInit: config.MCP_AUTH_TOKEN ? { headers: { authorization: `Bearer ${config.MCP_AUTH_TOKEN}` } } : undefined });
   const client = new Client({ name: 'bagseven-research-agent', version: '0.2.0' }, { capabilities: {} });

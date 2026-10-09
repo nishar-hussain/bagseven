@@ -152,7 +152,7 @@ Run the existing database, policy, daemon, and worker-bound MCP first. Then star
 pnpm demo:research
 ```
 
-Open `http://localhost:4020`, enter a task in the chat, and select **Send task**. Configure `OPENCODE_API_KEY`, `OPENCODE_BASE_URL=https://opencode.ai/zen/v1`, and `OPENCODE_MODEL=nemotron-3-ultra-free`. The agent uses OpenCode's OpenAI-compatible chat-completions endpoint with tool calling. Legacy `OPENAI_*` variables remain supported as a fallback. The provider uses live Wikipedia search/article APIs; if the worker, LLM, live provider, or payment fails, the run is reported as failed rather than being presented as approved.
+Open `http://localhost:4020`, enter a task in the chat, and select **Send task**. Configure `CLINE_API_KEY`, `CLINE_BASE_URL=https://api.cline.bot/api/v1`, and `CLINE_MODEL=minimax/minimax-m2.5`. The agent uses Cline's OpenAI-compatible chat-completions endpoint with tool calling. `OPENCODE_*` and `OPENAI_*` variables remain supported as fallbacks. The provider uses live Wikipedia search/article APIs; if the worker, LLM, live provider, or payment fails, the run is reported as failed rather than being presented as approved.
 
 Verify end-to-end against the configured Polygon Amoy RPC:
 ```bash
