@@ -14,12 +14,19 @@
     .grid { display:grid; grid-template-columns:1.2fr .8fr; gap:18px; margin-top:32px; }
     .card { background:rgba(18,27,52,.84); border:1px solid #27375d; border-radius:18px; padding:22px; box-shadow:0 16px 40px #05081455; }
     label { display:block; color:#a9b5ce; font-size:13px; margin-bottom:8px; }
-    textarea { width:100%; box-sizing:border-box; min-height:125px; resize:vertical; border-radius:12px; border:1px solid #3a4b76; background:#0a1124; color:#f7f9ff; padding:15px; font:inherit; font-size:16px; }
+    textarea { width:100%; box-sizing:border-box; min-height:74px; resize:vertical; border-radius:12px; border:1px solid #3a4b76; background:#0a1124; color:#f7f9ff; padding:15px; font:inherit; font-size:16px; }
     button { border:0; border-radius:10px; padding:12px 16px; font-weight:700; cursor:pointer; background:#7dd3fc; color:#07101f; margin:12px 8px 0 0; }
     button.secondary { background:#263657; color:#e8ecf4; }
     .metric { display:flex; justify-content:space-between; padding:12px 0; border-bottom:1px solid #263657; color:#a9b5ce; }
     .metric strong { color:#f7f9ff; }
-    #timeline { min-height:120px; margin-top:18px; }
+    #chat { min-height:180px; max-height:420px; overflow:auto; margin-top:18px; padding:4px 2px; }
+    .message { display:flex; margin:12px 0; }
+    .message.user { justify-content:flex-end; }
+    .bubble { max-width:88%; border-radius:14px; padding:11px 14px; line-height:1.5; white-space:pre-wrap; }
+    .message.user .bubble { background:#247ca5; color:#f7fbff; }
+    .message.agent .bubble { background:#172542; color:#dbe7ff; }
+    .message.system .bubble { background:#101a32; color:#8fa4ca; font-size:13px; width:100%; }
+    #timeline { min-height:80px; margin-top:18px; }
     .event { border-left:2px solid #38bdf8; padding:7px 0 7px 14px; margin:10px 0; }
     .event small { display:block; color:#7082a8; font-size:11px; margin-bottom:3px; }
     .event.refused { border-color:#fb7185; } .event.done { border-color:#4ade80; }
@@ -34,13 +41,15 @@
   <p class="lede">Ask an AI research agent a question. It can buy approved data through Bagseven MCP, but it cannot bypass the worker mandate or spend beyond its limits.</p>
   <div class="grid">
     <section class="card">
-      <label for="question">Research question</label>
-      <textarea id="question">Research the electric vehicle battery market and summarize the three most important trends.</textarea>
-      <div><button id="run">Run approved research</button><button id="blocked" class="secondary">Try blocked purchase</button></div>
-      <div id="timeline"><p class="muted">Your agent activity will appear here.</p></div>
+      <label for="question">Give your agent a task</label>
+      <div id="chat"><div class="message agent"><div class="bubble">Hi. I am your Bagseven research agent. Ask me to research a topic or buy an approved research report. I will use the worker-bound MCP and explain every payment decision.</div></div></div>
+      <textarea id="question" placeholder="Example: Research the electric vehicle battery market and summarize the three most important trends."></textarea>
+      <div><button id="send">Send task</button><button id="blocked" class="secondary">Test blocked purchase</button></div>
+      <div id="timeline"><p class="muted">MCP activity will appear here after you send a task.</p></div>
     </section>
     <aside class="card">
       <span class="pill">Worker-bound agent</span>
+      <div class="metric"><span>Agent connection</span><strong id="connection">MCP ready</strong></div>
       <div class="metric"><span>Mandate</span><strong id="mandate">Waiting</strong></div>
       <div class="metric"><span>Per purchase</span><strong>$1.00</strong></div>
       <div class="metric"><span>Demo resource</span><strong>$0.10</strong></div>
@@ -52,17 +61,31 @@
 <script>
 const $ = (id) => document.getElementById(id);
 let timer;
+let activeRun;
+function addMessage(role, text) {
+  const row = document.createElement('div'); row.className = `message ${role}`;
+  const bubble = document.createElement('div'); bubble.className = 'bubble'; bubble.textContent = text;
+  row.appendChild(bubble); $('chat').appendChild(row); $('chat').scrollTop = $('chat').scrollHeight;
+  return bubble;
+}
 function draw(run) {
   $('mandate').textContent = run.status === 'running' ? 'Checking…' : run.status === 'refused' ? 'Purchase refused' : run.status === 'completed' ? 'Payment approved' : 'Error';
-  $('timeline').innerHTML = run.events.map((e) => `<div class="event ${e.type.includes('refus') ? 'refused' : e.type.includes('summary') ? 'done' : ''}"><small>${new Date(e.at).toLocaleTimeString()} · ${e.type}</small>${e.message}</div>`).join('');
-  if (run.summary) $('summary').textContent = run.summary;
-  if (run.error) $('summary').textContent = run.error;
+  $('connection').textContent = run.status === 'running' ? 'Agent executing' : run.status === 'failed' ? 'Error' : 'MCP connected';
+  $('timeline').replaceChildren();
+  run.events.forEach((e) => { const item = document.createElement('div'); item.className = `event ${e.type.includes('refus') ? 'refused' : e.type.includes('summary') ? 'done' : ''}`; const small = document.createElement('small'); small.textContent = `${new Date(e.at).toLocaleTimeString()} · ${e.type}`; item.append(small, document.createTextNode(e.message)); $('timeline').appendChild(item); });
+  if (run.summary) { $('summary').textContent = run.summary; if (activeRun && !activeRun.finished) { addMessage('agent', run.summary); activeRun.finished = true; } }
+  if (run.error) { $('summary').textContent = run.error; if (activeRun && !activeRun.finished) { addMessage('agent', `I could not complete that task: ${run.error}`); activeRun.finished = true; } }
 }
 async function start(scenario) {
-  clearInterval(timer); $('summary').textContent = 'Agent is working…';
-  const response = await fetch('/api/research', { method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({ question:$('question').value, scenario }) });
+  const question = $('question').value.trim(); if (!question) return;
+  clearTimeout(timer); $('summary').textContent = 'Agent is working…'; $('question').value = '';
+  addMessage('user', question); addMessage('system', scenario === 'blocked' ? 'Testing a premium purchase against the active mandate…' : 'Agent is executing this task through Bagseven MCP…'); activeRun = { finished: false };
+  const response = await fetch('/api/research', { method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({ question, scenario }) });
+  if (!response.ok) { addMessage('agent', `The task could not start (HTTP ${response.status}).`); return; }
   const { run_id } = await response.json();
-  timer = setInterval(async () => { const run = await fetch('/api/runs/' + run_id).then((r) => r.json()); draw(run); if (run.status !== 'running') clearInterval(timer); }, 350);
+  const poll = async () => { const run = await fetch('/api/runs/' + run_id).then((r) => r.json()); draw(run); if (run.status === 'running') timer = setTimeout(poll, 350); };
+  poll();
 }
-$('run').onclick = () => start('approved'); $('blocked').onclick = () => start('blocked');
+$('send').onclick = () => start('approved'); $('blocked').onclick = () => start('blocked');
+$('question').addEventListener('keydown', (event) => { if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) start('approved'); });
 </script></body></html>

@@ -144,7 +144,7 @@ POST /v1/tools/:id/execute  (marketplace-tools)
 
 ## AI Research Buyer demo
 
-The isolated research demo lets a user ask a natural-language research question. The agent searches a local research marketplace, requests a paid report through the worker-bound MCP, and summarizes the result. The UI also includes a blocked premium-purchase scenario so mandate enforcement is visible.
+The research demo lets a user chat with a real OpenAI-compatible LLM agent. The agent receives the natural-language task, discovers live Wikipedia research sources through the worker-bound MCP, requests paid live content, and summarizes only the provider response. The UI also includes a blocked premium-purchase scenario so mandate enforcement is visible. Mock/fallback LLM responses are disabled.
 
 Run the existing database, policy, daemon, and worker-bound MCP first. Then start the provider and demo UI together:
 
@@ -152,9 +152,9 @@ Run the existing database, policy, daemon, and worker-bound MCP first. Then star
 pnpm demo:research
 ```
 
-Open `http://localhost:4020`, enter a research question, and select either **Run approved research** or **Try blocked purchase**. Configure `OPENAI_API_KEY` for an LLM-generated summary; without it, the demo uses a deterministic local summary while preserving the real MCP/payment flow.
+Open `http://localhost:4020`, enter a task in the chat, and select **Send task**. Configure `OPENAI_API_KEY`, `OPENAI_BASE_URL=https://openrouter.ai/api/v1`, and `OPENAI_MODEL=openrouter/free`. The provider uses live Wikipedia search/article APIs; if the worker, LLM, live provider, or payment fails, the run is reported as failed rather than being presented as approved.
 
-Verify end-to-end (against whatever `SEPOLIA_RPC_URL` points at):
+Verify end-to-end against the configured Polygon Amoy RPC:
 ```bash
 pnpm exec tsx scripts/e2e-phase2.ts
 ```
@@ -174,8 +174,8 @@ In `real` mode the treasury holds a **master account** (`TREASURY_MASTER_PRIVATE
 ### Test locally with Anvil (no faucet needed)
 
 ```bash
-# 1. Run a local EVM chain that mimics Ethereum Sepolia (chain id 11155111)
-docker run -d --name bagseven-anvil -p 8545:8545 ghcr.io/foundry-rs/foundry:stable "anvil --host 0.0.0.0 --chain-id 11155111 --silent"
+# 1. Run a local EVM chain for development (chain id 31337)
+docker run -d --name bagseven-anvil -p 8545:8545 ghcr.io/foundry-rs/foundry:stable "anvil --host 0.0.0.0 --chain-id 31337 --silent"
 
 # 2. Deploy a mock USDC + mint to the master account (prints MOCK_USDC + master address)
 node scripts/deploy-mock-usdc.mjs
@@ -185,8 +185,8 @@ cat >> .env <<'EOF'
 SIGNER_MODE=real
 TREASURY_AGENT_SEED=local-test-seed
 TREASURY_MASTER_PRIVATE_KEY=0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80
-SEPOLIA_RPC_URL=http://localhost:8545
-SEPOLIA_USDC=<MOCK_USDC from step 2>
+POLYGON_AMOY_RPC_URL=http://localhost:8545
+POLYGON_AMOY_USDC=<MOCK_USDC from step 2>
 GAS_GRANT_NATIVE=0.01
 EOF
 # restart the services, then:
@@ -208,14 +208,14 @@ E2E_CREDIT=10 E2E_SPEND=3 pnpm exec tsx scripts/e2e-real.ts   # full real-local 
 ```
 
 Funding in the console then runs real local transactions against the local master
-faucet. To go back to real Sepolia, set `SIGNER_MODE=real` with your funded key +
-`SEPOLIA_RPC_URL`, or `SIGNER_MODE=dev` for purely simulated settlement.
+faucet. To use real Polygon Amoy, set `SIGNER_MODE=real` with your funded key +
+`POLYGON_AMOY_RPC_URL`, or `SIGNER_MODE=dev` for purely simulated settlement.
 
-### Test on real Ethereum Sepolia
+### Test on real Polygon Amoy
 
 1. Create a wallet for the master account and fund it with testnet ETH + USDC:
-   - Sepolia faucets: `https://faucet.quicknode.com/ethereum/sepolia`, `https://www.alchemy.com/faucets/ethereum-sepolia` (ETH for gas), and Circle's testnet faucet for USDC.
-2. Set `SEPOLIA_RPC_URL=https://ethereum-sepolia-rpc.publicnode.com` (or any public Sepolia RPC), `SEPOLIA_USDC=0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238`, and `TREASURY_MASTER_PRIVATE_KEY` to that wallet's key.
-3. Restart and run `scripts/e2e-real.ts` — the same code, broadcasting to the real testnet. Verify the tx hashes on the [Sepolia explorer](https://sepolia.etherscan.io).
+   - Polygon Amoy faucet: `https://faucet.polygon.technology/` (POL for gas) and Circle's testnet faucet for USDC.
+2. Set `CHAIN_ID=80002`, `RPC_URL=https://polygon-amoy.drpc.org`, `USDC_ADDRESS=0x41E94Eb019C0762f9Bfcf9Fb1E58725BfB0e7582`, and `TREASURY_MASTER_PRIVATE_KEY` to the funded deployer key.
+3. Restart and create a mandate from the console. The policy service deploys `BagMandate` directly on Polygon Amoy. Verify the deployment and payment hashes on the [Amoy PolygonScan explorer](https://amoy.polygonscan.com).
 
 > Note: `real` mode uses derived software keys (`eoa` custody type). This is correct for testnet and local verification; production custody should swap in MPC/smart-account custody behind the same `Signer` interface — the reservation/policy code does not change.

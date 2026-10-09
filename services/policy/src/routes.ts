@@ -38,7 +38,7 @@ const createMandateSchema = z.object({
   per_purchase_cap: z.string().min(1),
   per_seller_pct: z.number().int().min(0).max(10000),
   max_depth: z.number().int().min(0),
-  chain_id: z.number().int().default(31337),
+  chain_id: z.number().int().default(80002),
   signature: z.string().min(1),
 });
 
@@ -46,7 +46,7 @@ const spawnSchema = z.object({
   parent_agent_id: z.string().uuid(),
   operator_address: z.string().regex(/^0x[0-9a-fA-F]{40}$/),
   share_percent: z.number().int().min(1).max(100),
-  chain_id: z.number().int().default(31337),
+  chain_id: z.number().int().default(80002),
   signature: z.string().min(1),
 });
 
@@ -56,7 +56,7 @@ const spendIntentSchema = z.object({
   recipient: z.string().regex(/^0x[0-9a-fA-F]{40}$/),
   nonce: z.number().int().nonnegative(),
   timestamp: z.number().int().positive(),
-  chain_id: z.number().int().default(31337),
+  chain_id: z.number().int().default(80002),
   signature: z.string().min(1),
   reason: z.string().max(500).optional(),
   request_id: z.string().uuid().optional(),
@@ -68,7 +68,7 @@ const settlementSchema = z.object({ tx_hash: z.string().min(1), recipient: z.str
 const withdrawSchema = z.object({
   amount: z.string().min(1),
   to_address: z.string().regex(/^0x[0-9a-fA-F]{40}$/),
-  chain_id: z.number().int().default(31337),
+  chain_id: z.number().int().default(80002),
   signature: z.string().min(1),
 });
 
@@ -93,7 +93,7 @@ function mandateClient(config: NodeJS.ProcessEnv): MandateClient {
   if (!key) throw new ApiError(503, 'ENFORCER_UNCONFIGURED', 'ENFORCER_DEV_KEY not set');
   return new MandateClient(key as `0x${string}`, {
     rpcUrl: config.RPC_URL ?? 'http://localhost:8545',
-    chainId: Number(config.CHAIN_ID ?? 31337),
+    chainId: Number(config.CHAIN_ID ?? 80002),
   });
 }
 
@@ -103,7 +103,7 @@ function ownerClient(config: NodeJS.ProcessEnv): MandateClient {
   if (!key) throw new ApiError(503, 'OWNER_KEY_UNCONFIGURED', 'OWNER_DEV_KEY not set');
   return new MandateClient(key as `0x${string}`, {
     rpcUrl: config.RPC_URL ?? 'http://localhost:8545',
-    chainId: Number(config.CHAIN_ID ?? 31337),
+    chainId: Number(config.CHAIN_ID ?? 80002),
   });
 }
 

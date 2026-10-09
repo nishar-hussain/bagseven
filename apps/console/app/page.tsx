@@ -38,10 +38,19 @@ export default function Page() {
       setBusy(name);
       try { await fn(); } catch (err) {
         const e = err as { code?: string; message?: string };
+        if (e.code === 'NOT_FOUND' && /mandate|agent/i.test(e.message ?? '') && session.mandate) {
+          const fresh = { ...EMPTY_SESSION, ownerAddress: address ?? undefined };
+          setSession(fresh);
+          setForceCreate(true);
+          setActiveSection('mandate');
+          try { localStorage.removeItem('bagseven-session'); } catch { /* ignore */ }
+          toast('info', 'The saved mandate no longer exists. The console was reset for a fresh mandate.');
+          return;
+        }
         toast('error', `${e.code ?? 'Error'}: ${e.message ?? String(err)}`);
       } finally { setBusy(null); }
     },
-    [toast],
+    [address, session.mandate, toast],
   );
 
   // Restore the persisted session on load BEFORE any persistence happens, so an

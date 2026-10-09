@@ -124,7 +124,7 @@ async function verifyChallenge(config: NodeJS.ProcessEnv, url: URL, challenge: z
   const recipient = challenge.payTo ?? challenge.recipient;
   if (!recipient) throw new ApiError(502, 'INVALID_PAYMENT_CHALLENGE', 'payment challenge has no recipient');
   if (challenge.expires_at < Math.floor(Date.now() / 1000)) throw new ApiError(502, 'PAYMENT_CHALLENGE_EXPIRED', 'provider payment challenge has expired');
-  const expectedChain = Number(config.CHAIN_ID ?? 11155111);
+  const expectedChain = Number(config.CHAIN_ID ?? 80002);
   if (challenge.chain !== undefined && Number(challenge.chain) !== expectedChain) throw new ApiError(502, 'PAYMENT_CHAIN_MISMATCH', 'provider challenge chain does not match Bagseven');
   const token = config.USDC_ADDRESS?.toLowerCase();
   if (token && challenge.token && challenge.token.toLowerCase() !== token) throw new ApiError(502, 'PAYMENT_TOKEN_MISMATCH', 'provider challenge token does not match Bagseven');
@@ -141,7 +141,7 @@ async function executeSpend(config: NodeJS.ProcessEnv, resolved: ResolvedWorker,
   }
   const now = Math.floor(Date.now() / 1000);
   const nonce = Number(`${now}${Math.floor(Math.random() * 1000).toString().padStart(3, '0')}`);
-  const chainId = Number(config.CHAIN_ID ?? 11155111);
+  const chainId = Number(config.CHAIN_ID ?? 80002);
   const signature = await signer.signTypedData({
     domain: spendIntentDomain(chainId),
     types: spendIntentTypes,
@@ -227,7 +227,7 @@ function buildRoutes(app: FastifyInstance, { config, redis }: ServiceDeps): void
     const result = await executeSpend(config, resolved, amount, recipient, body.reason);
     if (body.url && result.decision === 'allow') {
       const providerUrl = validateProviderUrl(config, body.url);
-      const payment = JSON.stringify({ tx_hash: result.tx_hash, amount, recipient, chain_id: Number(config.CHAIN_ID ?? 11155111), nonce: challenge?.nonce ?? null });
+      const payment = JSON.stringify({ tx_hash: result.tx_hash, amount, recipient, chain_id: Number(config.CHAIN_ID ?? 80002), nonce: challenge?.nonce ?? null });
       const retry = await fetch(providerUrl, { headers: { 'x-payment': payment, 'x-payment-response': payment } });
       provider = { status: retry.status, body: (await retry.text()).slice(0, 10000) };
     }
@@ -246,10 +246,10 @@ function buildRoutes(app: FastifyInstance, { config, redis }: ServiceDeps): void
       parentAgentId: body.parent_agent_id,
       operator: body.operator_address.toLowerCase() as `0x${string}`,
       sharePercent: body.share_percent,
-      chainId: Number(config.CHAIN_ID ?? 11155111),
+      chainId: Number(config.CHAIN_ID ?? 80002),
     });
     const signature = await owner.signMessage({ message: canonical });
-    return daemonApi(config, 'POST', `/v1/mandates/${body.mandate_id}/spawn-agent`, { ...body, chain_id: Number(config.CHAIN_ID ?? 11155111), signature });
+    return daemonApi(config, 'POST', `/v1/mandates/${body.mandate_id}/spawn-agent`, { ...body, chain_id: Number(config.CHAIN_ID ?? 80002), signature });
   });
 }
 

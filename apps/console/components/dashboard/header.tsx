@@ -78,7 +78,7 @@ export function Header({ activeSection, onSectionChange, mandateExists }: Header
                     <div className="flex items-center gap-2">
                       <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-neutral-100/90 border border-neutral-200/80 text-xs font-medium text-neutral-700">
                         <span className="w-1.5 h-1.5 rounded-full bg-green-500" />
-                        {chain?.name ?? 'Sepolia'}
+                        {chain?.name ?? 'Polygon Amoy'}
                       </div>
                       <button
                         onClick={openConnectModal}

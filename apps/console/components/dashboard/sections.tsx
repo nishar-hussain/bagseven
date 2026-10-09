@@ -75,7 +75,7 @@ export function OverviewSection(props: SectionProps) {
     run('withdraw', async () => {
       if (!session.mandate) throw new Error('sign a mandate first');
       if (!owner) throw new Error('connect your wallet first');
-      // Owner signs + submits the contract withdraw directly on-chain (Sepolia).
+      // Owner signs + submits the contract withdraw directly on-chain (Polygon Amoy).
       const tx = await withdrawFromContract(session.mandate.contract_address, withdrawAmt, owner);
       persist({ ...session });
       setWithdrawOpen(false);
@@ -320,7 +320,7 @@ export function MandateSection(props: SectionProps) {
   const [perPurchase, setPerPurchase] = useState('1');
   const [sellerPct, setSellerPct] = useState('35');
   const [maxDepth, setMaxDepth] = useState('3');
-  const [operator, setOperator] = useState(session.operatorAddress ?? '');
+  const [operator, setOperator] = useState('');
   const [fundAmt, setFundAmt] = useState('50');
   const [withdrawAmt, setWithdrawAmt] = useState('10');
   const [spendAmt, setSpendAmt] = useState('0.50');
@@ -328,18 +328,14 @@ export function MandateSection(props: SectionProps) {
   const [last, setLast] = useState<{ decision?: string; bound?: string; tx_hash?: string } | null>(null);
 
   const windowSeconds = windowH === '24 hours' ? 86400 : windowH === '12 hours' ? 43200 : 3600;
-  // The typed value is the operator; if left empty it falls back to your creator wallet.
-  const effectiveOperator = operator.trim() || owner || '';
-
-  // Restore the persisted operator into the field after a refresh.
-  useEffect(() => {
-    if (!operator && session.operatorAddress) setOperator(session.operatorAddress);
-  }, [operator, session.operatorAddress]);
+  // The operator must be entered explicitly for every new mandate. It is an
+  // address, not a private key, and is immutable after the mandate is signed.
+  const effectiveOperator = operator.trim();
 
   const sign = () =>
     run('sign mandate', async () => {
       if (!owner) throw new Error('connect your wallet first (top right)');
-      if (!effectiveOperator) throw new Error('enter an operator address (or connect your wallet)');
+      if (!effectiveOperator) throw new Error('enter the operator address');
       const canonical = mandateCanonical({ owner: owner, operator: effectiveOperator, budgetPerWindow: budget, windowSeconds, lifetimeCap: lifetime, perPurchaseCap: perPurchase, perSellerPct: Math.round(Number(sellerPct) * 100), maxDepth: Number(maxDepth) });
       const signature = await signMessage(canonical);
       const m = await client.createMandate({
@@ -497,7 +493,7 @@ export function MandateSection(props: SectionProps) {
 
           <div className={card}>
             <h2 className="text-[15px] font-semibold text-neutral-900">Operator</h2>
-            <p className="text-[12px] text-neutral-400 mt-0.5 mb-4">The key you provide — defaults to your connected wallet. Fixed here and cannot be changed later.</p>
+            <p className="text-[12px] text-neutral-400 mt-0.5 mb-4">Enter the operator wallet address explicitly. It is fixed here and cannot be changed after signing.</p>
             <input className={input} value={operator} onChange={(e) => setOperator(e.target.value)} placeholder="0x…" />
             {effectiveOperator && <div className="mt-2 text-xs text-neutral-500 font-mono">Operator = {shortAddress(effectiveOperator)}</div>}
           </div>
@@ -951,7 +947,7 @@ export function ResolveSection(props: SectionProps) {
     <div className="space-y-4">
       <div>
         <h1 className="text-[24px] font-bold text-neutral-900 tracking-tight leading-tight">Resolve an agent</h1>
-        <p className="text-[13px] text-neutral-500 mt-1 max-w-xl leading-relaxed">A name, or the address in a payment. The name says which contract to ask; the contract says what the agent may still spend. On Ethereum Sepolia, where ENSv2 lives.</p>
+        <p className="text-[13px] text-neutral-500 mt-1 max-w-xl leading-relaxed">A name, or the address in a payment. The name says which contract to ask; the contract says what the agent may still spend. On Polygon Amoy, where this testnet deployment lives.</p>
       </div>
       <div className={card}>
         <div className="flex items-center gap-2">

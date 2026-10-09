@@ -66,7 +66,7 @@ function buildServer(): McpServer {
       inputSchema: { query: z.string().min(1).max(500) },
     },
     async ({ query }) => {
-      const response = await fetch(`${RESEARCH_PROVIDER}/v1/providers`);
+      const response = await fetch(`${RESEARCH_PROVIDER}/v1/providers?query=${encodeURIComponent(query)}`);
       if (!response.ok) throw new Error(`research provider search failed (${response.status})`);
       const catalog = await response.json() as { providers?: Array<{ resources?: Array<{ id: string; title: string; category: string; price: string; provider: string; free: boolean; summary: string }> }> };
       const resources = (catalog.providers ?? []).flatMap((provider) => provider.resources ?? []).filter((resource) => `${resource.title} ${resource.category} ${resource.summary}`.toLowerCase().includes(query.toLowerCase()) || query.toLowerCase().includes('electric vehicle'));

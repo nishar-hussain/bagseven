@@ -329,7 +329,7 @@ export default function Home() {
   "agent_id": "agt_7c81e2",
   "amount": "3.00",
   "category": "data-purchase",
-  "chain": "sepolia",
+  "chain": "polygon_amoy",
   "counterparty": "prv_aave"
 }
 

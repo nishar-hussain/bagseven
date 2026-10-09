@@ -6,8 +6,8 @@
  * overview / resolve / withdraw.
  *
  * Usage: pnpm exec tsx scripts/e2e-bagseven.ts
- * Requires: gateway + mandate service up, .env pointed at Sepolia (real USDC),
- * and the master/enforcer wallet funded with Sepolia ETH + USDC.
+ * Requires: gateway + mandate service up, .env pointed at Polygon Amoy (real USDC),
+ * and the master/enforcer wallet funded with Amoy POL + USDC.
  */
 import { readFileSync } from 'node:fs';
 import { signMessage, privateKeyToAccount, parseUnits } from 'viem/accounts';

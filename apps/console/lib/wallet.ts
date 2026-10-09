@@ -10,8 +10,8 @@ import {
 import { BagMandateAbi, canonicalMandate, canonicalSpawn, canonicalWithdraw, spendIntentDomain, spendIntentTypes, type SpendIntent } from '@bagseven/onchain';
 import { wagmiConfig } from './wagmi';
 
-export const CHAIN_ID = Number(process.env.NEXT_PUBLIC_CHAIN_ID ?? 11155111);
-export const USDC_ADDRESS = (process.env.NEXT_PUBLIC_USDC_ADDRESS ?? '0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238') as `0x${string}`;
+export const CHAIN_ID = Number(process.env.NEXT_PUBLIC_CHAIN_ID ?? 80002);
+export const USDC_ADDRESS = (process.env.NEXT_PUBLIC_USDC_ADDRESS ?? '0x41E94Eb019C0762f9Bfcf9Fb1E58725BfB0e7582') as `0x${string}`;
 
 const erc20ApproveAbi = [
   {

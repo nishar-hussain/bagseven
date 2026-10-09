@@ -1,5 +1,5 @@
 /**
- * Bagseven tree E2E on Sepolia — root + spawn hierarchy + spends across the tree.
+ * Bagseven tree E2E on Polygon Amoy — root + spawn hierarchy + spends across the tree.
  *
  * Root → child A (50%) → grandchild C (50% of A); child B (25%). Verifies:
  * spawn depth cap (depth > max refused), spends from root/child/grandchild all
@@ -19,7 +19,7 @@ const env = Object.fromEntries(
   }),
 );
 const GATEWAY = process.env.GATEWAY_URL ?? 'http://localhost:4000';
-const CHAIN_ID = Number(env.CHAIN_ID ?? 11155111);
+const CHAIN_ID = Number(env.CHAIN_ID ?? 80002);
 
 const owner = privateKeyToAccount(env.OWNER_DEV_KEY as `0x${string}`);
 // Distinct operator keys for each agent (only sign EIP-712 off-chain; no gas).
@@ -66,7 +66,7 @@ async function main(): Promise<void> {
   const sig = await signMessage({ message: canonical, privateKey: env.OWNER_DEV_KEY as `0x${string}` });
   const mandate = await api('POST', '/v1/mandates', { owner_address: owner.address, operator_address: ops.root.address, budget_per_window: '20', window_seconds: 86400, lifetime_cap: '100', per_purchase_cap: '1', per_seller_pct: 3500, max_depth: 3, chain_id: CHAIN_ID, signature: sig });
   const rootId = mandate.root_agent_id as string;
-  log('root agent created (depth 0) + contract deployed on Sepolia', !!mandate.contract_address, { contract: mandate.contract_address.slice(0, 10) + '…' });
+  log('root agent created (depth 0) + contract deployed on Polygon Amoy', !!mandate.contract_address, { contract: mandate.contract_address.slice(0, 10) + '…' });
 
   // 2. Fund the vault (master faucet, $15).
   const funded = await api('POST', `/v1/vaults/${mandate.mandate_id}/fund`, { amount: '15' });

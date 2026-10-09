@@ -4,8 +4,6 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 export interface ResearchEvent { type: string; message: string; data?: unknown; at: string }
 export interface ResearchRunOptions { question: string; scenario: 'approved' | 'blocked'; emit: (event: ResearchEvent) => void; config?: NodeJS.ProcessEnv }
 
-interface Resource { id: string; title: string; provider: string; category: string; price: string; free: boolean; summary: string }
-
 function event(type: string, message: string, data?: unknown): ResearchEvent { return { type, message, ...(data === undefined ? {} : { data }), at: new Date().toISOString() }; }
 
 function parseToolResult(value: unknown): unknown {
@@ -15,63 +13,66 @@ function parseToolResult(value: unknown): unknown {
   try { return JSON.parse(text); } catch { return text; }
 }
 
-async function summarize(question: string, research: unknown, config: NodeJS.ProcessEnv): Promise<string> {
-  const apiKey = config.OPENAI_API_KEY;
-  if (!apiKey) {
-    const result = research as { resource?: { title?: string; summary?: string }; refusal?: string };
-    if (result.refusal) return result.refusal;
-    return `Research answer for “${question}”: ${result.resource?.title ?? 'the requested resource'} reports ${result.resource?.summary ?? 'the available market findings.'}`;
-  }
-  const base = config.OPENAI_BASE_URL ?? 'https://api.openai.com/v1';
-  const response = await fetch(`${base.replace(/\/$/, '')}/chat/completions`, { method: 'POST', headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' }, body: JSON.stringify({ model: config.OPENAI_MODEL ?? 'gpt-4o-mini', temperature: 0.2, messages: [{ role: 'system', content: 'You are a careful research analyst. Summarize only the supplied research and mention when a purchase was refused.' }, { role: 'user', content: `Question: ${question}\nResearch: ${JSON.stringify(research)}` }] }) });
-  if (!response.ok) throw new Error(`LLM summary failed (${response.status})`);
-  const payload = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
-  return payload.choices?.[0]?.message?.content ?? 'The model returned no summary.';
-}
+interface OpenRouterMessage { role: 'system' | 'user' | 'assistant' | 'tool'; content?: string | null; tool_calls?: Array<{ id: string; type: 'function'; function: { name: string; arguments: string } }>; tool_call_id?: string }
+interface ToolDefinition { type: 'function'; function: { name: string; description?: string; parameters: unknown } }
 
-async function chooseResource(question: string, resources: Resource[], scenario: 'approved' | 'blocked', config: NodeJS.ProcessEnv): Promise<Resource> {
-  const fallback = scenario === 'blocked' ? resources.find((item) => item.id === 'ev-premium-outlook') : resources.find((item) => item.id === 'ev-battery-pricing');
-  if (!fallback) throw new Error('demo research resource is not available');
-  if (scenario === 'blocked' || !config.OPENAI_API_KEY) return fallback;
+async function callModel(messages: OpenRouterMessage[], tools: ToolDefinition[], config: NodeJS.ProcessEnv): Promise<OpenRouterMessage> {
+  const apiKey = config.OPENAI_API_KEY;
+  if (!apiKey) throw new Error('OPENAI_API_KEY is required; mock/fallback mode is disabled');
   const base = config.OPENAI_BASE_URL ?? 'https://api.openai.com/v1';
-  const response = await fetch(`${base.replace(/\/$/, '')}/chat/completions`, { method: 'POST', headers: { authorization: `Bearer ${config.OPENAI_API_KEY}`, 'content-type': 'application/json' }, body: JSON.stringify({ model: config.OPENAI_MODEL ?? 'gpt-4o-mini', temperature: 0, response_format: { type: 'json_object' }, messages: [{ role: 'system', content: 'Choose exactly one research resource. Return JSON: {"resource_id":"..."}. Never choose a resource that is not in the catalog.' }, { role: 'user', content: `Question: ${question}\nCatalog: ${JSON.stringify(resources)}` }] }) });
-  if (!response.ok) throw new Error(`LLM resource selection failed (${response.status})`);
-  const payload = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
-  const selected = JSON.parse(payload.choices?.[0]?.message?.content ?? '{}') as { resource_id?: string };
-  return resources.find((item) => item.id === selected.resource_id) ?? fallback;
+  const response = await fetch(`${base.replace(/\/$/, '')}/chat/completions`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ model: config.OPENAI_MODEL ?? 'openrouter/free', temperature: 0.2, messages, tools, tool_choice: 'auto' }),
+  });
+  const raw = await response.text();
+  if (!response.ok) throw new Error(`LLM request failed (${response.status}): ${raw.slice(0, 500)}`);
+  const payload = JSON.parse(raw) as { choices?: Array<{ message?: OpenRouterMessage }> };
+  const message = payload.choices?.[0]?.message;
+  if (!message) throw new Error('LLM returned no assistant message');
+  return message;
 }
 
 export async function runResearch({ question, scenario, emit, config = process.env }: ResearchRunOptions): Promise<{ summary: string; result: unknown; status: 'completed' | 'refused' }> {
-  const providerUrl = config.RESEARCH_PROVIDER_URL ?? 'http://127.0.0.1:4010';
+  if (!config.OPENAI_API_KEY) throw new Error('OPENAI_API_KEY is required; configure a real OpenRouter model before running the agent');
   const mcpUrl = config.BAGSEVEN_MCP_URL ?? 'http://127.0.0.1:4009/v1/mcp';
-  emit(event('request_received', 'Research request received', { question, scenario }));
   const transport = new StreamableHTTPClientTransport(new URL(mcpUrl), { requestInit: config.MCP_AUTH_TOKEN ? { headers: { authorization: `Bearer ${config.MCP_AUTH_TOKEN}` } } : undefined });
-  const client = new Client({ name: 'bagseven-research-agent', version: '0.1.0' }, { capabilities: {} });
+  const client = new Client({ name: 'bagseven-research-agent', version: '0.2.0' }, { capabilities: {} });
+  const messages: OpenRouterMessage[] = [{ role: 'system', content: ['You are a Bagseven research agent.', 'Use the provided Bagseven MCP tools to inspect the worker, search live providers, and fetch research.', 'Never invent research, payment results, transaction hashes, or mandate decisions.', 'Only say payment succeeded when bagseven_fetch returns decision allow, provider status 200, and a paid live resource.', 'If a tool returns an error or the worker is missing, explain the failure and do not claim success.', scenario === 'blocked' ? 'For this test, choose the most expensive available live research resource so mandate refusal can be demonstrated.' : 'Choose the best live resource for the user task and keep spending within the active mandate.', 'After executing the tools, answer the user directly with sources and a concise summary.'].join('\n') }, { role: 'user', content: question }];
+  let lastToolResult: unknown;
   try {
     await client.connect(transport);
-    const tools = await client.listTools();
-    emit(event('mcp_connected', 'Research agent connected to worker-bound MCP', { tools: tools.tools.map((tool) => tool.name) }));
-    const status = parseToolResult(await client.callTool({ name: 'bagseven_status', arguments: {} }));
-    emit(event('mandate_checked', 'Worker mandate and vault status loaded', status));
-    emit(event('provider_search', 'Searching research providers through Bagseven MCP'));
-    const search = parseToolResult(await client.callTool({ name: 'bagseven_search', arguments: { query: question } })) as { resources?: Resource[] };
-    const allResources = search.resources ?? [];
-    const resource = await chooseResource(question, allResources, scenario, config);
-    emit(event('resource_selected', `Selected ${resource.title}`, { price: resource.price, provider: resource.provider }));
-    const result = parseToolResult(await client.callTool({ name: 'bagseven_fetch', arguments: { url: `${providerUrl}/v1/resources/${resource.id}`, reason: `Research task: ${question}` } }));
-    const typed = result as { decision?: string; provider?: { status?: number; body?: unknown }; reason?: string };
-    if (typed.decision === 'refused' || typed.provider?.status === 402) {
-      const refusal = typed.reason ?? 'Bagseven refused this purchase under the active mandate.';
-      emit(event('payment_refused', refusal, result));
-      const summary = await summarize(question, { refusal }, config);
-      emit(event('summary_ready', 'Research summary explains the refusal', { summary }));
-      return { summary, result, status: 'refused' };
+    const listed = await client.listTools();
+    const tools: ToolDefinition[] = listed.tools.map((tool) => ({ type: 'function', function: { name: tool.name, description: tool.description, parameters: tool.inputSchema } }));
+    emit(event('mcp_connected', 'Real agent connected to worker-bound Bagseven MCP', { tools: tools.map((tool) => tool.function.name) }));
+    for (let turn = 0; turn < 8; turn += 1) {
+      const assistant = await callModel(messages, tools, config);
+      messages.push(assistant);
+      const calls = assistant.tool_calls ?? [];
+      if (calls.length === 0) {
+        if (!assistant.content?.trim()) throw new Error('LLM returned no final answer');
+        const refused = typeof lastToolResult === 'object' && lastToolResult !== null && (lastToolResult as { decision?: string }).decision === 'refused';
+        emit(event('summary_ready', 'Real LLM response generated', { summary: assistant.content }));
+        return { summary: assistant.content, result: lastToolResult, status: refused ? 'refused' : 'completed' };
+      }
+      for (const call of calls) {
+        let args: Record<string, unknown>;
+        try { args = JSON.parse(call.function.arguments || '{}') as Record<string, unknown>; } catch { throw new Error(`LLM returned invalid arguments for ${call.function.name}`); }
+        emit(event('tool_call', `Agent called ${call.function.name}`, args));
+        const toolResult = parseToolResult(await client.callTool({ name: call.function.name, arguments: args }));
+        lastToolResult = toolResult;
+        if (call.function.name === 'bagseven_status') emit(event('mandate_checked', 'Worker mandate and vault status loaded', toolResult));
+        if (call.function.name === 'bagseven_search') emit(event('provider_search', 'Searching live research providers through Bagseven MCP', toolResult));
+        if (call.function.name === 'bagseven_fetch') {
+          const typed = toolResult as { decision?: string; provider?: { status?: number } };
+          if (typed.decision === 'allow' && typed.provider?.status === 200) emit(event('payment_approved', 'Bagseven approved and settled the live research purchase', toolResult));
+          else if (typed.decision === 'refused') emit(event('payment_refused', 'Bagseven refused the purchase under the active mandate', toolResult));
+          else emit(event('payment_error', 'Payment or provider execution failed; no successful purchase was recorded', toolResult));
+        }
+        messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify(toolResult) });
+      }
     }
-    emit(event('payment_approved', 'Bagseven approved and settled the research purchase', result));
-    const body = typed.provider?.body ?? result;
-    const summary = await summarize(question, body, config);
-    emit(event('summary_ready', 'Research summary generated', { summary }));
-    return { summary, result, status: 'completed' };
+    throw new Error('Agent exceeded the maximum MCP tool-call turns');
   } finally {
     await client.close().catch(() => undefined);
     await transport.close().catch(() => undefined);
