@@ -7,7 +7,6 @@ import {
   sendTransaction as coreSendTransaction,
   waitForTransactionReceipt,
   getAccount,
-  getChainId,
   getPublicClient,
   switchChain,
 } from '@wagmi/core';
@@ -43,9 +42,16 @@ const erc20BalanceAbi = [
 async function prepareAmoyFunding(contract: string, units: bigint): Promise<void> {
   const account = getAccount(wagmiConfig);
   if (!account.address) throw new Error('connect the wallet before funding the vault');
-  if (getChainId(wagmiConfig) !== CHAIN_ID) {
+  // Read the chain from the connected account. `getChainId(config)` can still
+  // return the configured/default chain while the browser wallet is actually
+  // connected to another network (for example Sepolia).
+  if (account.chainId !== CHAIN_ID) {
     try { await switchChain(wagmiConfig, { chainId: CHAIN_ID as 80002 }); }
     catch { throw new Error('switch the connected wallet to Polygon Amoy before funding the vault'); }
+  }
+  const connectedChainId = getAccount(wagmiConfig).chainId;
+  if (connectedChainId !== CHAIN_ID) {
+    throw new Error('the connected wallet is not on Polygon Amoy (chain 80002)');
   }
   const publicClient = await getPublicClient(wagmiConfig);
   if (!publicClient) throw new Error('Polygon Amoy RPC is unavailable');
