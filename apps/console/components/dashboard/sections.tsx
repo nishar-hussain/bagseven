@@ -332,6 +332,15 @@ export function MandateSection(props: SectionProps) {
   // address, not a private key, and is immutable after the mandate is signed.
   const effectiveOperator = operator.trim();
 
+  // Consume the parent request after render. Calling the parent setter
+  // directly below during render causes React's "Cannot update a component
+  // while rendering a different component" warning.
+  useEffect(() => {
+    if (!forceCreateMandate) return;
+    setCreatingNew(true);
+    onConsumeMandateCreate?.();
+  }, [forceCreateMandate, onConsumeMandateCreate]);
+
   const sign = () =>
     run('sign mandate', async () => {
       if (!owner) throw new Error('connect your wallet first (top right)');
@@ -389,10 +398,6 @@ export function MandateSection(props: SectionProps) {
       toast(res.decision === 'allow' ? 'ok' : 'info', res.decision === 'allow' ? `Executed on-chain ${res.tx_hash?.slice(0, 14)}…` : `Refused — ${res.bound}`);
     });
 
-  if (forceCreateMandate && !creatingNew) {
-    setCreatingNew(true);
-    onConsumeMandateCreate?.();
-  }
   const showCreate = creatingNew || forceCreateMandate || !session.mandate;
 
   if (session.mandate && !showCreate) {
