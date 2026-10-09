@@ -152,7 +152,7 @@ Run the existing database, policy, daemon, and worker-bound MCP first. Then star
 pnpm demo:research
 ```
 
-Open `http://localhost:4020`, enter a task in the chat, and select **Send task**. Configure `OPENAI_API_KEY`, `OPENAI_BASE_URL=https://openrouter.ai/api/v1`, and `OPENAI_MODEL=openrouter/free`. The provider uses live Wikipedia search/article APIs; if the worker, LLM, live provider, or payment fails, the run is reported as failed rather than being presented as approved.
+Open `http://localhost:4020`, enter a task in the chat, and select **Send task**. Configure `OPENCODE_API_KEY`, `OPENCODE_BASE_URL=https://opencode.ai/zen/v1`, and `OPENCODE_MODEL=nemotron-3-ultra-free`. The agent uses OpenCode's OpenAI-compatible chat-completions endpoint with tool calling. Legacy `OPENAI_*` variables remain supported as a fallback. The provider uses live Wikipedia search/article APIs; if the worker, LLM, live provider, or payment fails, the run is reported as failed rather than being presented as approved.
 
 Verify end-to-end against the configured Polygon Amoy RPC:
 ```bash

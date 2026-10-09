@@ -17,13 +17,14 @@ interface OpenRouterMessage { role: 'system' | 'user' | 'assistant' | 'tool'; co
 interface ToolDefinition { type: 'function'; function: { name: string; description?: string; parameters: unknown } }
 
 async function callModel(messages: OpenRouterMessage[], tools: ToolDefinition[], config: NodeJS.ProcessEnv): Promise<OpenRouterMessage> {
-  const apiKey = config.OPENAI_API_KEY;
-  if (!apiKey) throw new Error('OPENAI_API_KEY is required; mock/fallback mode is disabled');
-  const base = config.OPENAI_BASE_URL ?? 'https://api.openai.com/v1';
+  const apiKey = config.OPENCODE_API_KEY ?? config.OPENAI_API_KEY;
+  if (!apiKey) throw new Error('OPENCODE_API_KEY is required; mock/fallback mode is disabled');
+  const base = config.OPENCODE_BASE_URL ?? config.OPENAI_BASE_URL ?? 'https://opencode.ai/zen/v1';
+  const model = config.OPENCODE_MODEL ?? config.OPENAI_MODEL ?? 'nemotron-3-ultra-free';
   const response = await fetch(`${base.replace(/\/$/, '')}/chat/completions`, {
     method: 'POST',
     headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' },
-    body: JSON.stringify({ model: config.OPENAI_MODEL ?? 'openrouter/free', temperature: 0.2, messages, tools, tool_choice: 'auto' }),
+    body: JSON.stringify({ model, temperature: 0.2, messages, tools, tool_choice: 'auto' }),
   });
   const raw = await response.text();
   if (!response.ok) throw new Error(`LLM request failed (${response.status}): ${raw.slice(0, 500)}`);
@@ -34,7 +35,7 @@ async function callModel(messages: OpenRouterMessage[], tools: ToolDefinition[],
 }
 
 export async function runResearch({ question, scenario, emit, config = process.env }: ResearchRunOptions): Promise<{ summary: string; result: unknown; status: 'completed' | 'refused' }> {
-  if (!config.OPENAI_API_KEY) throw new Error('OPENAI_API_KEY is required; configure a real OpenRouter model before running the agent');
+  if (!(config.OPENCODE_API_KEY ?? config.OPENAI_API_KEY)) throw new Error('OPENCODE_API_KEY is required; configure a real OpenCode model before running the agent');
   const mcpUrl = config.BAGSEVEN_MCP_URL ?? 'http://127.0.0.1:4009/v1/mcp';
   const transport = new StreamableHTTPClientTransport(new URL(mcpUrl), { requestInit: config.MCP_AUTH_TOKEN ? { headers: { authorization: `Bearer ${config.MCP_AUTH_TOKEN}` } } : undefined });
   const client = new Client({ name: 'bagseven-research-agent', version: '0.2.0' }, { capabilities: {} });
