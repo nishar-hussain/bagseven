@@ -30,10 +30,13 @@ async function callModel(messages: OpenRouterMessage[], tools: ToolDefinition[],
   });
   const raw = await response.text();
   if (!response.ok) throw new Error(`LLM request failed (${response.status}): ${raw.slice(0, 500)}`);
-  const payload = JSON.parse(raw) as { choices?: Array<{ message?: OpenRouterMessage }> };
+  const envelope = JSON.parse(raw) as { choices?: Array<{ message?: OpenRouterMessage }>; data?: { choices?: Array<{ message?: OpenRouterMessage }> } };
+  // Cline returns { success, data: { choices } }, while other
+  // OpenAI-compatible providers return { choices } directly.
+  const payload = envelope.data ?? envelope;
   const message = payload.choices?.[0]?.message;
   if (!message) {
-    const keys = Object.keys(payload).join(', ') || 'none';
+    const keys = Object.keys(envelope).join(', ') || 'none';
     throw new Error(`LLM returned no assistant message (response keys: ${keys}; body: ${raw.slice(0, 300)})`);
   }
   return message;
