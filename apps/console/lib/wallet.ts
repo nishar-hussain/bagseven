@@ -39,6 +39,19 @@ const erc20BalanceAbi = [
   },
 ];
 
+/** Ensure the browser wallet, not just the app configuration, is on Amoy. */
+export async function ensureAmoyNetwork(): Promise<void> {
+  const account = getAccount(wagmiConfig);
+  if (!account.address) throw new Error('connect the wallet before continuing');
+  if (account.chainId !== CHAIN_ID) {
+    try { await switchChain(wagmiConfig, { chainId: CHAIN_ID as 80002 }); }
+    catch { throw new Error('switch the connected wallet to Polygon Amoy before continuing'); }
+  }
+  if (getAccount(wagmiConfig).chainId !== CHAIN_ID) {
+    throw new Error('the connected wallet is not on Polygon Amoy (chain 80002)');
+  }
+}
+
 async function prepareAmoyFunding(contract: string, units: bigint): Promise<void> {
   const account = getAccount(wagmiConfig);
   if (!account.address) throw new Error('connect the wallet before funding the vault');
@@ -67,17 +80,20 @@ export function shortAddress(a: string): string {
 
 /** EIP-191 personal_sign via the connected wallet (RainbowKit/wagmi). */
 export async function signMessage(message: string): Promise<string> {
+  await ensureAmoyNetwork();
   return coreSignMessage(wagmiConfig, { message });
 }
 
 /** Send native ETH from the connected wallet to `to`. */
 export async function sendNativeEth(to: string, amountEth: string): Promise<string> {
+  await ensureAmoyNetwork();
   const value = BigInt(Math.round(Number(amountEth) * 1e18));
   return coreSendTransaction(wagmiConfig, { to: to as `0x${string}`, value });
 }
 
 /** Owner withdraws directly from the mandate contract via the connected wallet. */
 export async function withdrawFromContract(contract: string, amountUsdc: string, to: string): Promise<string> {
+  await ensureAmoyNetwork();
   const units = BigInt(Math.round(Number(amountUsdc) * 1e6));
   const data = encodeFunctionData({ abi: BagMandateAbi, functionName: 'withdraw', args: [units, to.toLowerCase()] });
   const res = await coreSendTransaction(wagmiConfig, { to: contract as `0x${string}`, data });
@@ -110,6 +126,7 @@ export async function fundFromContract(contract: string, amountUsdc: string): Pr
  * EIP-712 spend intent through the connected wallet. No browser-held key needed.
  */
 export async function signSpendIntent(intent: SpendIntent, _address: string): Promise<string> {
+  await ensureAmoyNetwork();
   return coreSignTypedData(wagmiConfig, {
     domain: spendIntentDomain(intent.chainId),
     types: spendIntentTypes,
