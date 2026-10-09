@@ -24,13 +24,18 @@ async function callModel(messages: OpenRouterMessage[], tools: ToolDefinition[],
   const response = await fetch(`${base.replace(/\/$/, '')}/chat/completions`, {
     method: 'POST',
     headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' },
-    body: JSON.stringify({ model, temperature: 0.2, messages, tools, tool_choice: 'auto' }),
+    // Cline supports streaming, but the research loop expects one complete
+    // OpenAI-compatible JSON response so it can execute MCP tool calls.
+    body: JSON.stringify({ model, temperature: 0.2, messages, tools, tool_choice: 'auto', stream: false }),
   });
   const raw = await response.text();
   if (!response.ok) throw new Error(`LLM request failed (${response.status}): ${raw.slice(0, 500)}`);
   const payload = JSON.parse(raw) as { choices?: Array<{ message?: OpenRouterMessage }> };
   const message = payload.choices?.[0]?.message;
-  if (!message) throw new Error('LLM returned no assistant message');
+  if (!message) {
+    const keys = Object.keys(payload).join(', ') || 'none';
+    throw new Error(`LLM returned no assistant message (response keys: ${keys}; body: ${raw.slice(0, 300)})`);
+  }
   return message;
 }
 
