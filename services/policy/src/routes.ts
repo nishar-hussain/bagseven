@@ -448,7 +448,7 @@ export function buildPolicyRoutes(app: FastifyInstance, { db, redis, config }: S
     const [vault, w, l] = contract ? await Promise.all([client.vaultBalance(contract), client.spendState(contract), client.lifetimeSpent(contract)]) : [0n, 0n, 0n];
     return {
       agent: { id: agent.id, operator_address: agent.operatorAddress, depth: agent.depth, share_percent: agent.sharePercent, status: agent.status, name: agent.name, mcp_endpoint: agent.mcpEndpoint },
-      mandate: { id: mandate.id, owner_address: mandate.ownerAddress, contract_address: mandate.contractAddress, budget_per_window: mandate.budgetPerWindow, lifetime_cap: mandate.lifetimeCap, per_purchase_cap: mandate.perPurchaseCap, per_seller_pct: mandate.perSellerPct, max_depth: mandate.maxDepth },
+      mandate: { id: mandate.id, owner_address: mandate.ownerAddress, operator_address: mandate.operatorAddress, contract_address: mandate.contractAddress, status: mandate.status, budget_per_window: mandate.budgetPerWindow, lifetime_cap: mandate.lifetimeCap, per_purchase_cap: mandate.perPurchaseCap, per_seller_pct: mandate.perSellerPct, max_depth: mandate.maxDepth },
       remaining: {
         vault_available: fromUnits(vault),
         remaining_window: sub(mandate.budgetPerWindow, fromUnits(w)),
