@@ -8,6 +8,7 @@ import { ApiError, createService, type ServiceDeps } from '@bagseven/server';
 import { recoverEip191 } from '@bagseven/onchain';
 import type { FastifyInstance } from 'fastify';
 import { parseUnits } from 'viem';
+import { assertVaultSupportsEip3009, decodeX402PaymentRequired, selectX402Requirements, validateX402AgainstPolicy } from './x402.js';
 
 const fetchSchema = z.object({
   worker: z.string().min(1),
@@ -50,7 +51,8 @@ interface WorkerRecord {
 
 interface ResolvedWorker {
   agent: WorkerRecord;
-  mandate: { id: string; owner_address: string; operator_address: string; status: string };
+  mandate: { id: string; owner_address: string; operator_address: string; status: string; per_purchase_cap: string };
+  remaining: { vault_available: string; remaining_window: string; remaining_lifetime: string; can_draw: string };
 }
 
 interface SpendResult {
@@ -212,6 +214,16 @@ function buildRoutes(app: FastifyInstance, { config, redis }: ServiceDeps): void
         try { parsed = JSON.parse(decoded); } catch { throw new ApiError(502, 'INVALID_PAYMENT_CHALLENGE', 'provider returned an unreadable payment challenge'); }
       } else {
         try { parsed = JSON.parse(challengeBody); } catch { throw new ApiError(502, 'INVALID_PAYMENT_CHALLENGE', 'provider returned an unreadable payment challenge'); }
+      }
+      if (parsed && typeof parsed === 'object' && (parsed as { x402Version?: unknown }).x402Version === 2) {
+        const requirement = selectX402Requirements(decodeX402PaymentRequired(challengeHeader, parsed), (config.USDC_ADDRESS ?? '') as `0x${string}`);
+        validateX402AgainstPolicy(requirement, {
+          perPurchaseCap: parseUnits(resolved.mandate.per_purchase_cap, 6),
+          remainingWindow: parseUnits(resolved.remaining.remaining_window, 6),
+          remainingLifetime: parseUnits(resolved.remaining.remaining_lifetime, 6),
+          vaultAvailable: parseUnits(resolved.remaining.vault_available, 6),
+        });
+        assertVaultSupportsEip3009();
       }
       challenge = paymentChallengeSchema.parse(parsed);
       amount = challenge.amount;

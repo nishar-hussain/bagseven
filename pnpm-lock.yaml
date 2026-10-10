@@ -300,6 +300,9 @@ importers:
       '@bagseven/server':
         specifier: workspace:*
         version: link:../../packages/server
+      '@x402/core':
+        specifier: 2.28.0
+        version: 2.28.0
       fastify:
         specifier: ^5.12.5
         version: 5.12.5
