@@ -85,8 +85,8 @@ async function daemonApi(config: NodeJS.ProcessEnv, method: string, path: string
   const text = await response.text();
   const payload = text ? JSON.parse(text) : undefined;
   if (!response.ok) {
-    const error = (payload as { error?: { code?: string; message?: string } } | undefined)?.error;
-    throw new ApiError(response.status, error?.code ?? 'POLICY_REQUEST_FAILED', error?.message ?? response.statusText);
+    const error = (payload as { error?: { code?: string; message?: string; details?: unknown } } | undefined)?.error;
+    throw new ApiError(response.status, error?.code ?? 'POLICY_REQUEST_FAILED', error?.message ?? response.statusText, error?.details);
   }
   return payload;
 }
