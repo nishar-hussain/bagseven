@@ -13,6 +13,15 @@ function parseToolResult(value: unknown): unknown {
   try { return JSON.parse(text); } catch { return text; }
 }
 
+function toolFailure(value: unknown): string | undefined {
+  if (value && typeof value === 'object' && 'error' in value) {
+    const error = (value as { error?: unknown }).error;
+    if (typeof error === 'string') return error;
+    if (error !== undefined) return JSON.stringify(error);
+  }
+  return undefined;
+}
+
 interface OpenRouterMessage { role: 'system' | 'user' | 'assistant' | 'tool'; content?: string | null; tool_calls?: Array<{ id: string; type: 'function'; function: { name: string; arguments: string } }>; tool_call_id?: string }
 interface ToolDefinition { type: 'function'; function: { name: string; description?: string; parameters: unknown } }
 
@@ -47,7 +56,7 @@ export async function runResearch({ question, scenario, emit, config = process.e
   const mcpUrl = config.BAGSEVEN_MCP_URL ?? 'http://127.0.0.1:4009/v1/mcp';
   const transport = new StreamableHTTPClientTransport(new URL(mcpUrl), { requestInit: config.MCP_AUTH_TOKEN ? { headers: { authorization: `Bearer ${config.MCP_AUTH_TOKEN}` } } : undefined });
   const client = new Client({ name: 'bagseven-research-agent', version: '0.2.0' }, { capabilities: {} });
-  const messages: OpenRouterMessage[] = [{ role: 'system', content: ['You are a Bagseven research agent.', 'Use the provided Bagseven MCP tools to inspect the worker, search live providers, and fetch research.', 'Never invent research, payment results, transaction hashes, or mandate decisions.', 'Only say payment succeeded when bagseven_fetch returns decision allow, provider status 200, and a paid live resource.', 'If a tool returns an error or the worker is missing, explain the failure and do not claim success.', scenario === 'blocked' ? 'For this test, choose the most expensive available live research resource so mandate refusal can be demonstrated.' : 'Choose the best live resource for the user task and keep spending within the active mandate.', 'After executing the tools, answer the user directly with sources and a concise summary.'].join('\n') }, { role: 'user', content: question }];
+  const messages: OpenRouterMessage[] = [{ role: 'system', content: ['You are a Bagseven research agent.', 'For payment tasks, call bagseven_status first, then inspect the exact user-supplied endpoint without changing its hostname or URL.', 'Use the provided Bagseven MCP tools to inspect the worker, search live providers, and fetch research.', 'Never invent research, payment results, transaction hashes, or mandate decisions.', 'Only say payment succeeded when bagseven_fetch returns decision allow, provider status 200, and a paid live resource.', 'If any MCP tool returns an error, stop immediately and report that exact error. Never retry a failed bagseven_fetch call.', 'If a purchase is refused or unsupported, stop and report the refusal. Do not try another URL, provider, recipient, or amount.', scenario === 'blocked' ? 'For this test, choose the most expensive available live research resource so mandate refusal can be demonstrated.' : 'Choose the best live resource for the user task and keep spending within the active mandate.', 'After executing the tools, answer the user directly with sources and a concise summary.'].join('\n') }, { role: 'user', content: question }];
   let lastToolResult: unknown;
   try {
     await client.connect(transport);
@@ -68,15 +77,27 @@ export async function runResearch({ question, scenario, emit, config = process.e
         let args: Record<string, unknown>;
         try { args = JSON.parse(call.function.arguments || '{}') as Record<string, unknown>; } catch { throw new Error(`LLM returned invalid arguments for ${call.function.name}`); }
         emit(event('tool_call', `Agent called ${call.function.name}`, args));
-        const toolResult = parseToolResult(await client.callTool({ name: call.function.name, arguments: args }));
+        const callResult = await client.callTool({ name: call.function.name, arguments: args }) as { isError?: boolean; content?: unknown };
+        const toolResult = parseToolResult(callResult);
         lastToolResult = toolResult;
+        const failure = toolFailure(toolResult);
+        if (callResult.isError || failure) {
+          const message = failure ?? `MCP tool ${call.function.name} failed`;
+          emit(event('error', `Bagseven MCP rejected ${call.function.name}: ${message}`, toolResult));
+          throw new Error(`Bagseven MCP ${call.function.name} failed: ${message}`);
+        }
         if (call.function.name === 'bagseven_status') emit(event('mandate_checked', 'Worker mandate and vault status loaded', toolResult));
         if (call.function.name === 'bagseven_search') emit(event('provider_search', 'Searching live research providers through Bagseven MCP', toolResult));
         if (call.function.name === 'bagseven_fetch') {
           const typed = toolResult as { decision?: string; provider?: { status?: number } };
           if (typed.decision === 'allow' && typed.provider?.status === 200) emit(event('payment_approved', 'Bagseven approved and settled the live research purchase', toolResult));
-          else if (typed.decision === 'refused') emit(event('payment_refused', 'Bagseven refused the purchase under the active mandate', toolResult));
-          else emit(event('payment_error', 'Payment or provider execution failed; no successful purchase was recorded', toolResult));
+          else if (typed.decision === 'refused') {
+            emit(event('payment_refused', 'Bagseven refused the purchase under the active mandate; no retry was attempted', toolResult));
+            return { summary: `Bagseven refused the purchase. Exact result:\n${JSON.stringify(toolResult, null, 2)}`, result: toolResult, status: 'refused' };
+          } else {
+            emit(event('payment_error', 'Payment or provider execution failed; no retry was attempted', toolResult));
+            throw new Error(`Bagseven payment did not succeed: ${JSON.stringify(toolResult)}`);
+          }
         }
         messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify(toolResult) });
       }
