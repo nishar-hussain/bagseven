@@ -82,10 +82,9 @@ export function validateX402AgainstPolicy(requirement: X402Requirements, limits:
 }
 
 /**
- * BagMandate is not an EIP-3009 payer. It owns the USDC and only permits the
- * enforcer to call execute(); it cannot produce transferWithAuthorization.
- * Keep this explicit so a future vault-compatible adapter cannot accidentally
- * fall back to an operator EOA or ask the LLM to sign.
+ * Kept as an explicit guard for deployments that have not configured the
+ * isolated Polygon Amoy payer. A BagMandate vault is not itself an EIP-3009
+ * payer; the daemon must never silently fall back to the operator or enforcer.
  */
 export function assertVaultSupportsEip3009(): never {
   throw new ApiError(

@@ -8,7 +8,15 @@ import { ApiError, createService, type ServiceDeps } from '@bagseven/server';
 import { recoverEip191 } from '@bagseven/onchain';
 import type { FastifyInstance } from 'fastify';
 import { parseUnits } from 'viem';
-import { assertVaultSupportsEip3009, decodeX402PaymentRequired, selectX402Requirements, validateX402AgainstPolicy } from './x402.js';
+import { decodeX402PaymentRequired, selectX402Requirements, validateX402AgainstPolicy, type X402Requirements } from './x402.js';
+import { x402PayerFromEnv, type X402Payer } from './x402-payer.js';
+
+function fromAtomicUnits(units: string): string {
+  const value = BigInt(units);
+  const whole = value / 1_000_000n;
+  const fraction = (value % 1_000_000n).toString().padStart(6, '0').replace(/0+$/, '');
+  return fraction ? `${whole}.${fraction}` : whole.toString();
+}
 
 const fetchSchema = z.object({
   worker: z.string().min(1),
@@ -51,7 +59,7 @@ interface WorkerRecord {
 
 interface ResolvedWorker {
   agent: WorkerRecord;
-  mandate: { id: string; owner_address: string; operator_address: string; status: string; per_purchase_cap: string };
+  mandate: { id: string; owner_address: string; operator_address: string; contract_address: string; status: string; per_purchase_cap: string };
   remaining: { vault_available: string; remaining_window: string; remaining_lifetime: string; can_draw: string };
 }
 
@@ -136,7 +144,7 @@ async function verifyChallenge(config: NodeJS.ProcessEnv, url: URL, challenge: z
   if (signer.toLowerCase() !== providerAddress) throw new ApiError(502, 'PAYMENT_CHALLENGE_SIGNATURE_INVALID', 'provider payment challenge signature is invalid');
 }
 
-async function executeSpend(config: NodeJS.ProcessEnv, resolved: ResolvedWorker, amount: string, recipient: string, reason?: string): Promise<SpendResult> {
+async function executeSpend(config: NodeJS.ProcessEnv, resolved: ResolvedWorker, amount: string, recipient: string, reason?: string, executionRecipient = recipient): Promise<SpendResult> {
   const signer = accountFromEnv(config);
   if (signer.address.toLowerCase() !== resolved.agent.operator_address.toLowerCase()) {
     throw new ApiError(403, 'DAEMON_OPERATOR_MISMATCH', 'daemon signer is not the worker operator');
@@ -165,7 +173,7 @@ async function executeSpend(config: NodeJS.ProcessEnv, resolved: ResolvedWorker,
   const executor = new MandateClient(config.DAEMON_EXECUTOR_KEY as `0x${string}`, { rpcUrl: config.RPC_URL ?? 'http://localhost:8545', chainId });
   try {
     if (executor.address.toLowerCase() !== (config.DAEMON_EXECUTOR_ADDRESS ?? executor.address).toLowerCase()) throw new ApiError(403, 'DAEMON_EXECUTOR_MISMATCH', 'daemon executor does not match the configured contract enforcer');
-    const txHash = await executor.execute(result.authorization.contract_address as `0x${string}`, parseUnits(amount, 6), result.authorization.recipient, result.authorization.worker_id);
+    const txHash = await executor.execute(result.authorization.contract_address as `0x${string}`, parseUnits(amount, 6), executionRecipient as `0x${string}`, result.authorization.worker_id);
     await daemonApi(config, 'POST', `/v1/reservations/${result.reservation_id}/settle`, { tx_hash: txHash, recipient });
     return { ...result, tx_hash: txHash };
   } catch (error) {
@@ -198,6 +206,8 @@ function buildRoutes(app: FastifyInstance, { config, redis }: ServiceDeps): void
     let recipient = body.recipient;
     let provider: { status: number; body: unknown } | undefined;
     let challenge: z.infer<typeof paymentChallengeSchema> | undefined;
+    let x402Requirement: X402Requirements | undefined;
+    let x402Payment: { required: ReturnType<typeof decodeX402PaymentRequired>; payer: X402Payer } | undefined;
 
     if (body.url) {
       const providerUrl = validateProviderUrl(config, body.url);
@@ -216,32 +226,72 @@ function buildRoutes(app: FastifyInstance, { config, redis }: ServiceDeps): void
         try { parsed = JSON.parse(challengeBody); } catch { throw new ApiError(502, 'INVALID_PAYMENT_CHALLENGE', 'provider returned an unreadable payment challenge'); }
       }
       if (parsed && typeof parsed === 'object' && (parsed as { x402Version?: unknown }).x402Version === 2) {
-        const requirement = selectX402Requirements(decodeX402PaymentRequired(challengeHeader, parsed), (config.USDC_ADDRESS ?? '') as `0x${string}`);
+        const required = decodeX402PaymentRequired(challengeHeader, parsed);
+        const requirement = selectX402Requirements(required, (config.USDC_ADDRESS ?? '') as `0x${string}`);
         validateX402AgainstPolicy(requirement, {
           perPurchaseCap: parseUnits(resolved.mandate.per_purchase_cap, 6),
           remainingWindow: parseUnits(resolved.remaining.remaining_window, 6),
           remainingLifetime: parseUnits(resolved.remaining.remaining_lifetime, 6),
           vaultAvailable: parseUnits(resolved.remaining.vault_available, 6),
         });
-        assertVaultSupportsEip3009();
+        let payer: X402Payer;
+        try {
+          payer = x402PayerFromEnv(config, resolved.agent.operator_address, config.DAEMON_EXECUTOR_ADDRESS ?? '');
+        } catch (error) {
+          throw new ApiError(503, 'X402_PAYER_UNCONFIGURED', (error as Error).message);
+        }
+        if (await payer.balance() !== 0n) throw new ApiError(409, 'X402_PAYER_NOT_EMPTY', 'isolated x402 payer must have a zero USDC balance before a new payment');
+        x402Requirement = requirement;
+        x402Payment = { required, payer };
+        amount = fromAtomicUnits(requirement.amount);
+        recipient = requirement.payTo;
       }
-      challenge = paymentChallengeSchema.parse(parsed);
-      amount = challenge.amount;
-      recipient = challenge.payTo ?? challenge.recipient;
-      if (!recipient) throw new ApiError(502, 'INVALID_PAYMENT_CHALLENGE', 'payment challenge has no recipient');
-      await verifyChallenge(config, providerUrl, challenge);
-      const challengeKey = `bagseven:payment-challenge:${providerUrl.hostname}:${challenge.nonce ?? challenge.signature}`;
-      const fresh = await redis.set(challengeKey, '1', 'EX', Math.max(1, challenge.expires_at - Math.floor(Date.now() / 1000)), 'NX');
+      if (!x402Requirement) {
+        challenge = paymentChallengeSchema.parse(parsed);
+        amount = challenge.amount;
+        recipient = challenge.payTo ?? challenge.recipient;
+        if (!recipient) throw new ApiError(502, 'INVALID_PAYMENT_CHALLENGE', 'payment challenge has no recipient');
+        await verifyChallenge(config, providerUrl, challenge);
+      }
+      const challengeKey = `bagseven:payment-challenge:${providerUrl.hostname}:${x402Requirement ? `${x402Requirement.network}:${x402Requirement.asset}:${x402Requirement.amount}:${x402Requirement.payTo}` : (challenge?.nonce ?? challenge?.signature)}`;
+      const expiresAt = x402Requirement
+        ? Math.floor(Date.now() / 1000) + x402Requirement.maxTimeoutSeconds
+        : challenge?.expires_at ?? Math.floor(Date.now() / 1000) + 120;
+      const fresh = await redis.set(challengeKey, '1', 'EX', Math.max(1, expiresAt - Math.floor(Date.now() / 1000)), 'NX');
       if (fresh !== 'OK') throw new ApiError(409, 'PAYMENT_CHALLENGE_REPLAYED', 'provider payment challenge has already been used');
     }
 
     if (!amount || !recipient) throw new ApiError(400, 'PAYMENT_INPUT_REQUIRED', 'amount and recipient are required');
-    const result = await executeSpend(config, resolved, amount, recipient, body.reason);
+    const payerAddress = x402Payment?.payer.account.address;
+    const result = await executeSpend(config, resolved, amount, recipient, body.reason, payerAddress ?? recipient);
     if (body.url && result.decision === 'allow') {
       const providerUrl = validateProviderUrl(config, body.url);
-      const payment = JSON.stringify({ tx_hash: result.tx_hash, amount, recipient, chain_id: Number(config.CHAIN_ID ?? 80002), nonce: challenge?.nonce ?? null });
-      const retry = await fetch(providerUrl, { headers: { 'x-payment': payment, 'x-payment-response': payment } });
-      provider = { status: retry.status, body: (await retry.text()).slice(0, 10000) };
+      if (x402Payment && x402Requirement) {
+        if (!result.reservation_id || !result.tx_hash) {
+          if (result.reservation_id) await daemonApi(config, 'POST', `/v1/reservations/${result.reservation_id}/release`, {}).catch(() => undefined);
+          throw new ApiError(503, 'X402_EXECUTOR_UNCONFIGURED', 'x402 payer requires a configured daemon executor and a confirmed BagMandate funding transaction');
+        }
+        try {
+          const payment = await x402Payment.payer.createPayment(x402Payment.required, x402Requirement);
+          const retry = await fetch(providerUrl, { headers: { 'PAYMENT-SIGNATURE': payment.header } });
+          const responseBody = (await retry.text()).slice(0, 10000);
+          if (!retry.ok) {
+            await x402Payment.payer.refund(resolved.mandate.contract_address as `0x${string}`, payment.amount);
+            await daemonApi(config, 'POST', `/v1/reservations/${result.reservation_id}/release`, {}).catch(() => undefined);
+            throw new ApiError(502, 'X402_SETTLEMENT_FAILED', `provider rejected x402 payment (${retry.status})`, { body: responseBody });
+          }
+          provider = { status: retry.status, body: responseBody };
+        } catch (error) {
+          if (error instanceof ApiError) throw error;
+          await x402Payment.payer.refund(resolved.mandate.contract_address as `0x${string}`, x402Payment.payer.account.address === payerAddress ? parseUnits(amount, 6) : 0n).catch(() => undefined);
+          await daemonApi(config, 'POST', `/v1/reservations/${result.reservation_id}/release`, {}).catch(() => undefined);
+          throw new ApiError(502, 'X402_SETTLEMENT_FAILED', (error as Error).message);
+        }
+      } else {
+        const payment = JSON.stringify({ tx_hash: result.tx_hash, amount, recipient, chain_id: Number(config.CHAIN_ID ?? 80002), nonce: challenge?.nonce ?? null });
+        const retry = await fetch(providerUrl, { headers: { 'x-payment': payment, 'x-payment-response': payment } });
+        provider = { status: retry.status, body: (await retry.text()).slice(0, 10000) };
+      }
     }
     return { ...result, worker: resolved.agent, mandate: resolved.mandate, provider };
   });
