@@ -41,8 +41,9 @@ async function daemon(method: string, path: string, body?: unknown): Promise<unk
   const raw = await response.text();
   const payload = raw ? JSON.parse(raw) : undefined;
   if (!response.ok) {
-    const error = (payload as { error?: { message?: string } } | undefined)?.error?.message;
-    throw new Error(error ?? `Bagseven daemon request failed (${response.status})`);
+    const error = (payload as { error?: { message?: string; code?: string; details?: unknown } } | undefined)?.error;
+    const details = error?.details === undefined ? '' : ` details=${JSON.stringify(error.details)}`;
+    throw new Error(`${error?.code ? `${error.code}: ` : ''}${error?.message ?? `Bagseven daemon request failed (${response.status})`}${details}`);
   }
   return payload;
 }
