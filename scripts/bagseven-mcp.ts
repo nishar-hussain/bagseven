@@ -86,7 +86,15 @@ function buildServer(): McpServer {
         reason: z.string().max(500).optional().describe('audit reason'),
       },
     },
-    async ({ url, amount, recipient, reason }) => text(await daemon('POST', `/internal/workers/${encodeURIComponent(WORKER)}/fetch`, { url, amount, recipient, reason })),
+    async ({ url, amount, recipient, reason }) => text(await daemon('POST', `/internal/workers/${encodeURIComponent(WORKER)}/fetch`, {
+      // Models commonly serialize optional fields as empty strings. Remove
+      // those values before validation; an empty amount/recipient is not the
+      // same as an omitted field for the daemon's Zod schema.
+      url: url?.trim() || undefined,
+      amount: amount?.trim() || undefined,
+      recipient: recipient?.trim() || undefined,
+      reason: reason?.trim() || undefined,
+    })),
   );
 
   server.registerTool(
