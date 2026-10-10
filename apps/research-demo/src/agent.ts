@@ -22,6 +22,13 @@ function toolFailure(value: unknown): string | undefined {
   return undefined;
 }
 
+function toolContentText(value: unknown): string | undefined {
+  if (!value || typeof value !== 'object' || !Array.isArray((value as { content?: unknown }).content)) return undefined;
+  const text = (value as { content: Array<{ type?: string; text?: string }> }).content
+    .find((item) => item.type === 'text' && item.text)?.text;
+  return text?.slice(0, 1000);
+}
+
 interface OpenRouterMessage { role: 'system' | 'user' | 'assistant' | 'tool'; content?: string | null; tool_calls?: Array<{ id: string; type: 'function'; function: { name: string; arguments: string } }>; tool_call_id?: string }
 interface ToolDefinition { type: 'function'; function: { name: string; description?: string; parameters: unknown } }
 
@@ -80,7 +87,7 @@ export async function runResearch({ question, scenario, emit, config = process.e
         const callResult = await client.callTool({ name: call.function.name, arguments: args }) as { isError?: boolean; content?: unknown };
         const toolResult = parseToolResult(callResult);
         lastToolResult = toolResult;
-        const failure = toolFailure(toolResult);
+        const failure = toolFailure(toolResult) ?? (callResult.isError ? toolContentText(callResult) : undefined);
         if (callResult.isError || failure) {
           const message = failure ?? `MCP tool ${call.function.name} failed`;
           emit(event('error', `Bagseven MCP rejected ${call.function.name}: ${message}`, toolResult));
