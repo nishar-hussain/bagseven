@@ -66,7 +66,11 @@ export async function runResearch({ question, scenario, emit, config = process.e
   const messages: OpenRouterMessage[] = [{ role: 'system', content: ['You are a Bagseven research agent.', 'For payment tasks, call bagseven_status first, then inspect the exact user-supplied endpoint without changing its hostname or URL.', 'Use the provided Bagseven MCP tools to inspect the worker, search live providers, and fetch research.', 'Never invent research, payment results, transaction hashes, or mandate decisions.', 'Only say payment succeeded when bagseven_fetch returns decision allow, provider status 200, and a paid live resource.', 'If any MCP tool returns an error, stop immediately and report that exact error. Never retry a failed bagseven_fetch call.', 'If a purchase is refused or unsupported, stop and report the refusal. Do not try another URL, provider, recipient, or amount.', scenario === 'blocked' ? 'For this test, choose the most expensive available live research resource so mandate refusal can be demonstrated.' : 'Choose the best live resource for the user task and keep spending within the active mandate.', 'After executing the tools, answer the user directly with sources and a concise summary.'].join('\n') }, { role: 'user', content: question }];
   let lastToolResult: unknown;
   try {
-    await client.connect(transport);
+    try {
+      await client.connect(transport);
+    } catch (error) {
+      throw new Error(`Bagseven MCP is unreachable at ${mcpUrl}; start the worker-bound MCP on port 4009 (${(error as Error).message})`);
+    }
     const listed = await client.listTools();
     const tools: ToolDefinition[] = listed.tools.map((tool) => ({ type: 'function', function: { name: tool.name, description: tool.description, parameters: tool.inputSchema } }));
     emit(event('mcp_connected', 'Real agent connected to worker-bound Bagseven MCP', { tools: tools.map((tool) => tool.function.name) }));
