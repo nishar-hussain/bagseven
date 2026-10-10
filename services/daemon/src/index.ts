@@ -240,7 +240,9 @@ function buildRoutes(app: FastifyInstance, { config, redis }: ServiceDeps): void
         } catch (error) {
           throw new ApiError(503, 'X402_PAYER_UNCONFIGURED', (error as Error).message);
         }
-        if (await payer.balance() !== 0n) throw new ApiError(409, 'X402_PAYER_NOT_EMPTY', 'isolated x402 payer must have a zero USDC balance before a new payment');
+        if (config.BAGSEVEN_X402_PAYER_ALLOW_NONZERO !== 'true' && await payer.balance() !== 0n) {
+          throw new ApiError(409, 'X402_PAYER_NOT_EMPTY', 'isolated x402 payer has an existing USDC balance; set BAGSEVEN_X402_PAYER_ALLOW_NONZERO=true only for a controlled testnet payer');
+        }
         x402Requirement = requirement;
         x402Payment = { required, payer };
         amount = fromAtomicUnits(requirement.amount);
