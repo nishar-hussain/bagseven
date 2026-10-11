@@ -137,7 +137,13 @@ async function main(): Promise<void> {
     const app = express();
     app.use(express.json());
     const transports = new Map<string, InstanceType<typeof StreamableHTTPServerTransport>>();
-    app.get('/v1/mcp', (_req, res) => res.json({ ok: true, service: 'bagseven-mcp', worker: WORKER }));
+    app.get('/v1/mcp', (_req, res) => {
+      // The console uses this unauthenticated localhost health response to
+      // confirm that the selected worker-bound process is running. It exposes
+      // no secrets and is never a tool or daemon authorization endpoint.
+      res.setHeader('access-control-allow-origin', process.env.BAGSEVEN_MCP_CORS_ORIGIN ?? 'http://localhost:3000');
+      res.json({ ok: true, service: 'bagseven-mcp', worker: WORKER });
+    });
     app.post('/v1/mcp', async (req, res) => {
       if (process.env.MCP_AUTH_TOKEN && req.headers.authorization !== `Bearer ${process.env.MCP_AUTH_TOKEN}`) {
         res.status(401).json({ error: 'unauthorized' });

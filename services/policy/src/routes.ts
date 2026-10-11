@@ -89,8 +89,11 @@ const providerSchema = z.object({
 });
 
 function mandateClient(config: NodeJS.ProcessEnv): MandateClient {
-  const key = config.ENFORCER_DEV_KEY;
-  if (!key) throw new ApiError(503, 'ENFORCER_UNCONFIGURED', 'ENFORCER_DEV_KEY not set');
+  // Keep the policy and daemon configuration names compatible. The daemon's
+  // production-facing name is DAEMON_EXECUTOR_KEY; ENFORCER_DEV_KEY remains
+  // accepted for existing local environments.
+  const key = config.DAEMON_EXECUTOR_KEY ?? config.ENFORCER_DEV_KEY;
+  if (!key) throw new ApiError(503, 'ENFORCER_UNCONFIGURED', 'DAEMON_EXECUTOR_KEY (or legacy ENFORCER_DEV_KEY) not set');
   return new MandateClient(key as `0x${string}`, {
     rpcUrl: config.RPC_URL ?? 'http://localhost:8545',
     chainId: Number(config.CHAIN_ID ?? 80002),
@@ -99,8 +102,8 @@ function mandateClient(config: NodeJS.ProcessEnv): MandateClient {
 
 /** Owner-key client, used for owner-only on-chain actions (withdraw/revoke). */
 function ownerClient(config: NodeJS.ProcessEnv): MandateClient {
-  const key = config.OWNER_DEV_KEY;
-  if (!key) throw new ApiError(503, 'OWNER_KEY_UNCONFIGURED', 'OWNER_DEV_KEY not set');
+  const key = config.DAEMON_OWNER_KEY ?? config.OWNER_DEV_KEY;
+  if (!key) throw new ApiError(503, 'OWNER_KEY_UNCONFIGURED', 'DAEMON_OWNER_KEY (or legacy OWNER_DEV_KEY) not set');
   return new MandateClient(key as `0x${string}`, {
     rpcUrl: config.RPC_URL ?? 'http://localhost:8545',
     chainId: Number(config.CHAIN_ID ?? 80002),

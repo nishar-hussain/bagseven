@@ -5,6 +5,7 @@ import { useAccount } from 'wagmi';
 import { Client } from '../../lib/client';
 import type { Session } from '../../lib/types';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '../ui/dialog';
+import { McpConnection } from './mcp-connection';
 import {
   CHAIN_ID,
   fundFromContract,
@@ -784,6 +785,8 @@ export function AgentsSection(props: SectionProps) {
           </div>
         )}
       </div>
+
+      <McpConnection session={session} client={client} agents={tree as Session['tree'] ?? []} busy={busy !== null} run={run} toast={toast} />
 
       {/* Spawn agent modal */}
       <Dialog open={spawnOpen} onOpenChange={setSpawnOpen}>

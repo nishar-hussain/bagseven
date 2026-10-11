@@ -9,6 +9,8 @@
   },
   "scripts": {
     "bagseven-mcp": "tsx scripts/bagseven-mcp.ts",
+    "mcp:smoke": "tsx scripts/mcp-smoke.ts",
+    "test:mcp-config": "vitest run --config vitest.local.config.ts",
     "bagseven-daemon": "pnpm --filter @bagseven/daemon start",
     "research-provider": "pnpm --filter @bagseven/research-provider dev",
     "research-demo": "pnpm --filter @bagseven/research-demo dev",
