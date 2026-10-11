@@ -124,6 +124,12 @@ export async function fundFromContract(contract: string, amountUsdc: string): Pr
   const account = getAccount(wagmiConfig);
   const publicClient = await getPublicClient(wagmiConfig);
   if (!publicClient || !account.address) throw new Error('Polygon Amoy RPC is unavailable');
+  // Read transaction metadata through Bagseven's retry/fallback transport.
+  // Passing it explicitly prevents an injected wallet with a rate-limited RPC
+  // from making eth_getBlockByNumber/eth_getTransactionCount requests while
+  // preparing the transaction.
+  const gasPrice = await publicClient.getGasPrice();
+  let nextNonce = await publicClient.getTransactionCount({ address: account.address, blockTag: 'pending' });
   const allowance = BigInt(await publicClient.readContract({
     address: USDC_ADDRESS,
     abi: erc20AllowanceAbi,
@@ -132,14 +138,18 @@ export async function fundFromContract(contract: string, amountUsdc: string): Pr
   }) as unknown as bigint);
   if (allowance < units) {
     const approveData = encodeFunctionData({ abi: erc20ApproveAbi, functionName: 'approve', args: [contract.toLowerCase(), units] });
-    const approveHash = await coreSendTransaction(wagmiConfig, { to: USDC_ADDRESS, data: approveData });
+    // The injected wallet may use its own rate-limited RPC for eth_estimateGas
+    // and eth_getBlockByNumber. Supplying a bounded gas limit prevents that
+    // simulation request while the transaction remains fully wallet-signed.
+    const approveHash = await coreSendTransaction(wagmiConfig, { to: USDC_ADDRESS, data: approveData, gas: 100_000n, gasPrice, nonce: nextNonce });
+    nextNonce += 1;
     // The mandate's fund() call uses transferFrom(). Wait for the approval to
     // be mined before submitting fund(), otherwise the funding transaction can
     // be simulated while the allowance is still zero and revert.
     await waitForTransactionReceipt(wagmiConfig, { hash: approveHash, retryCount: 5, retryDelay: 1000 });
   }
   const fundData = encodeFunctionData({ abi: BagMandateAbi, functionName: 'fund', args: [units] });
-  const fundHash = await coreSendTransaction(wagmiConfig, { to: contract as `0x${string}`, data: fundData });
+  const fundHash = await coreSendTransaction(wagmiConfig, { to: contract as `0x${string}`, data: fundData, gas: 200_000n, gasPrice, nonce: nextNonce });
   // Do not refresh the UI until the USDC transfer is confirmed on-chain.
   await waitForTransactionReceipt(wagmiConfig, { hash: fundHash });
   return fundHash;
