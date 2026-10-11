@@ -34,6 +34,9 @@ export function McpConnection({ session, client, agents, busy, run, toast }: Pro
   const selected = activeAgents.find((agent) => agent.id === selectedId);
   const config = selected ? buildLocalMcpConfig({ workerId: selected.id }) : null;
   const configText = config ? JSON.stringify(config, null, 2) : '';
+  const startCommand = selected
+    ? `BAGSEVEN_MCP_WORKER=${selected.id} BAGSEVEN_MCP_PORT=4009 DAEMON_URL=http://127.0.0.1:4001 pnpm bagseven-mcp`
+    : '';
 
   const copy = async () => {
     if (!configText) return;
@@ -55,21 +58,20 @@ export function McpConnection({ session, client, agents, busy, run, toast }: Pro
       if (resolved.mandate?.status !== 'active') throw new Error('worker mandate is not active');
       if (Number(resolved.remaining?.vault_available ?? 0) <= 0) throw new Error('vault has no available USDC');
 
-      const controller = new AbortController();
-      const timeout = window.setTimeout(() => controller.abort(), 4000);
       let health: { ok?: boolean; worker?: string };
       try {
-        const response = await fetch(localMcpUrl(), { signal: controller.signal });
-        health = await response.json() as { ok?: boolean; worker?: string };
-        if (!response.ok) throw new Error(`MCP health returned HTTP ${response.status}`);
-      } finally {
-        window.clearTimeout(timeout);
+        const response = await fetch(`/api/mcp-health?worker=${encodeURIComponent(selected.id)}`, { cache: 'no-store' });
+        const body = await response.json() as { ok?: boolean; worker?: string; error?: string };
+        if (!response.ok) throw new Error(body.error ?? `MCP health returned HTTP ${response.status}`);
+        health = body;
+      } catch (error) {
+        throw new Error((error as Error).message || `MCP is not reachable at ${localMcpUrl()}`);
       }
       if (health.ok !== true || health.worker !== selected.id) throw new Error('MCP is running, but it is bound to a different worker');
       setReadiness({ state: 'ready', message: `MCP is reachable and bound to ${selected.name ?? 'the selected worker'}. Available now: $${resolved.remaining?.can_draw ?? '0.00'}.` });
       toast('ok', 'Worker, mandate, vault, and MCP connection are ready');
     } catch (error) {
-      const message = (error as Error).name === 'AbortError' ? 'MCP health check timed out' : (error as Error).message;
+      const message = (error as Error).message;
       setReadiness({ state: 'error', message });
       throw new Error(message);
     }
@@ -109,6 +111,7 @@ export function McpConnection({ session, client, agents, busy, run, toast }: Pro
             <div className="flex items-center justify-between mb-2"><label className="text-xs font-medium text-neutral-700">Generated local configuration</label><button onClick={copy} disabled={!configText} className="text-xs font-medium text-neutral-700 border border-neutral-200 rounded-full px-3 py-1 hover:bg-neutral-50 disabled:opacity-50">Copy configuration</button></div>
             <pre className="rounded-xl bg-neutral-950 text-neutral-100 p-4 text-xs leading-5 overflow-x-auto min-h-[170px]">{configText || 'Select an active worker to generate configuration.'}</pre>
             <p className="text-[11px] text-neutral-400 mt-2">Run the MCP command from the Bagseven repository. The generated block contains only routing settings and the selected worker ID.</p>
+            {startCommand && <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3"><div className="text-xs font-medium text-amber-900">Start MCP in another terminal</div><code className="block mt-1 text-[11px] leading-4 text-amber-900 break-all">{startCommand}</code></div>}
           </div>
         </div>
       )}
