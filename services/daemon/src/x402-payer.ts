@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { createPublicClient, createWalletClient, http, type Address, type Hex, type PublicClient } from 'viem';
+import { createPublicClient, createWalletClient, fallback, http, type Address, type Hex, type PublicClient } from 'viem';
 import { privateKeyToAccount, type PrivateKeyAccount } from 'viem/accounts';
 import { polygonAmoy } from 'viem/chains';
 import { encodePaymentSignatureHeader } from '@x402/core/http';
@@ -37,6 +37,7 @@ const authorizationTypes = {
 export interface X402PayerConfig {
   key: Hex;
   rpcUrl: string;
+  rpcFallbackUrl?: string;
   chainId: number;
   usdc: Address;
 }
@@ -59,7 +60,14 @@ export class X402Payer {
   constructor(config: X402PayerConfig) {
     if (config.chainId !== 80002) throw new Error('x402 payer is restricted to Polygon Amoy (chain 80002)');
     this.account = privateKeyToAccount(config.key);
-    this.publicClient = createPublicClient({ chain: polygonAmoy, transport: http(config.rpcUrl) });
+    const fallbackUrl = config.rpcFallbackUrl ?? 'https://polygon-amoy.drpc.org';
+    this.publicClient = createPublicClient({
+      chain: polygonAmoy,
+      transport: fallback([
+        http(config.rpcUrl, { retryCount: 3, retryDelay: 500 }),
+        http(fallbackUrl, { retryCount: 3, retryDelay: 750 }),
+      ]),
+    });
     this.walletClient = createWalletClient({ account: this.account, chain: polygonAmoy, transport: http(config.rpcUrl) });
     this.usdc = config.usdc;
     this.chainId = config.chainId;
@@ -122,6 +130,7 @@ export function x402PayerFromEnv(config: NodeJS.ProcessEnv, operator: string, en
   const payer = new X402Payer({
     key: key as Hex,
     rpcUrl: config.RPC_URL ?? 'https://polygon-amoy.drpc.org',
+    rpcFallbackUrl: config.RPC_FALLBACK_URL ?? 'https://polygon-amoy.drpc.org',
     chainId: Number(config.CHAIN_ID ?? 80002),
     usdc: config.USDC_ADDRESS as Address,
   });

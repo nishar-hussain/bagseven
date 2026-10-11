@@ -211,7 +211,12 @@ function buildRoutes(app: FastifyInstance, { config, redis }: ServiceDeps): void
 
     if (body.url) {
       const providerUrl = validateProviderUrl(config, body.url);
-      const initial = await fetch(providerUrl);
+      let initial: Response;
+      try {
+        initial = await fetch(providerUrl);
+      } catch (error) {
+        throw new ApiError(502, 'PROVIDER_FETCH_FAILED', `provider request failed: ${(error as Error).message}`, { url: providerUrl.toString() });
+      }
       if (initial.status !== 402) {
         return { decision: 'NO_PAYMENT_REQUIRED', executed: false, provider: { status: initial.status, body: (await initial.text()).slice(0, 10000) } };
       }
@@ -240,7 +245,13 @@ function buildRoutes(app: FastifyInstance, { config, redis }: ServiceDeps): void
         } catch (error) {
           throw new ApiError(503, 'X402_PAYER_UNCONFIGURED', (error as Error).message);
         }
-        if (config.BAGSEVEN_X402_PAYER_ALLOW_NONZERO !== 'true' && await payer.balance() !== 0n) {
+        let payerBalance: bigint;
+        try {
+          payerBalance = await payer.balance();
+        } catch (error) {
+          throw new ApiError(503, 'X402_PAYER_RPC_FAILED', `could not read x402 payer balance: ${(error as Error).message}`);
+        }
+        if (config.BAGSEVEN_X402_PAYER_ALLOW_NONZERO !== 'true' && payerBalance !== 0n) {
           throw new ApiError(409, 'X402_PAYER_NOT_EMPTY', 'isolated x402 payer has an existing USDC balance; set BAGSEVEN_X402_PAYER_ALLOW_NONZERO=true only for a controlled testnet payer');
         }
         x402Requirement = requirement;
