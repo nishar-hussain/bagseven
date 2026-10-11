@@ -3,6 +3,7 @@
 import { getDefaultConfig } from '@rainbow-me/rainbowkit';
 import { http } from 'wagmi';
 import { polygonAmoy } from 'wagmi/chains';
+import { fallback } from 'viem';
 
 export const projectId = process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID ?? 'YOUR_PROJECT_ID';
 
@@ -12,6 +13,12 @@ export const wagmiConfig = getDefaultConfig({
   chains: [polygonAmoy],
   ssr: true,
   transports: {
-    [polygonAmoy.id]: http(process.env.NEXT_PUBLIC_RPC_URL ?? 'https://polygon-amoy.drpc.org'),
+    // Public RPCs can rate-limit the several reads performed around an
+    // approval/fund flow. Keep the configured endpoint first, then fail over
+    // to a second Amoy endpoint without changing the connected wallet chain.
+    [polygonAmoy.id]: fallback([
+      http(process.env.NEXT_PUBLIC_RPC_URL ?? 'https://polygon-amoy.drpc.org', { retryCount: 3, retryDelay: 500 }),
+      http(process.env.NEXT_PUBLIC_RPC_FALLBACK_URL ?? 'https://polygon-amoy.drpc.org', { retryCount: 3, retryDelay: 750 }),
+    ]),
   },
 });

@@ -39,6 +39,19 @@ const erc20BalanceAbi = [
   },
 ];
 
+const erc20AllowanceAbi = [
+  {
+    type: 'function' as const,
+    name: 'allowance' as const,
+    inputs: [
+      { name: 'owner', type: 'address' as const },
+      { name: 'spender', type: 'address' as const },
+    ],
+    outputs: [{ name: 'allowance', type: 'uint256' as const }],
+    stateMutability: 'view' as const,
+  },
+];
+
 /** Ensure the browser wallet, not just the app configuration, is on Amoy. */
 export async function ensureAmoyNetwork(): Promise<void> {
   const account = getAccount(wagmiConfig);
@@ -108,12 +121,23 @@ export async function fundFromContract(contract: string, amountUsdc: string): Pr
   const units = BigInt(Math.round(Number(amountUsdc) * 1e6));
   if (units <= 0n) throw new Error('funding amount must be greater than zero');
   await prepareAmoyFunding(contract, units);
-  const approveData = encodeFunctionData({ abi: erc20ApproveAbi, functionName: 'approve', args: [contract.toLowerCase(), units] });
-  const approveHash = await coreSendTransaction(wagmiConfig, { to: USDC_ADDRESS, data: approveData });
-  // The mandate's fund() call uses transferFrom(). Wait for the approval to be
-  // mined before submitting fund(), otherwise the RPC can process fund() while
-  // the allowance is still zero and the vault funding transaction reverts.
-  await waitForTransactionReceipt(wagmiConfig, { hash: approveHash });
+  const account = getAccount(wagmiConfig);
+  const publicClient = await getPublicClient(wagmiConfig);
+  if (!publicClient || !account.address) throw new Error('Polygon Amoy RPC is unavailable');
+  const allowance = BigInt(await publicClient.readContract({
+    address: USDC_ADDRESS,
+    abi: erc20AllowanceAbi,
+    functionName: 'allowance',
+    args: [account.address, contract as `0x${string}`],
+  }) as unknown as bigint);
+  if (allowance < units) {
+    const approveData = encodeFunctionData({ abi: erc20ApproveAbi, functionName: 'approve', args: [contract.toLowerCase(), units] });
+    const approveHash = await coreSendTransaction(wagmiConfig, { to: USDC_ADDRESS, data: approveData });
+    // The mandate's fund() call uses transferFrom(). Wait for the approval to
+    // be mined before submitting fund(), otherwise the funding transaction can
+    // be simulated while the allowance is still zero and revert.
+    await waitForTransactionReceipt(wagmiConfig, { hash: approveHash, retryCount: 5, retryDelay: 1000 });
+  }
   const fundData = encodeFunctionData({ abi: BagMandateAbi, functionName: 'fund', args: [units] });
   const fundHash = await coreSendTransaction(wagmiConfig, { to: contract as `0x${string}`, data: fundData });
   // Do not refresh the UI until the USDC transfer is confirmed on-chain.
