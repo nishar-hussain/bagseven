@@ -89,7 +89,7 @@ export function McpConnection({ session, client, agents, busy, run, toast }: Pro
   });
 
   return (
-    <div className="bg-white rounded-2xl border border-neutral-200/80 p-6 shadow-[0_1px_3px_rgba(0,0,0,0.01)]">
+    <div className="bg-white rounded-xl border border-neutral-200 p-5 shadow-[0_1px_2px_rgba(15,23,42,0.04)]">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <h2 className="text-base font-semibold text-neutral-900">Connect your custom agent</h2>
@@ -114,12 +114,12 @@ export function McpConnection({ session, client, agents, busy, run, toast }: Pro
               <div className="flex justify-between"><span>Mandate</span><b>{session.mandate ? 'Selected mandate' : 'Missing'}</b></div>
               <div className="flex justify-between"><span>Local MCP</span><b>127.0.0.1:4009</b></div>
             </div>
-            <button onClick={check} disabled={busy || !selected} className="px-5 py-2 rounded-full text-sm font-medium text-white bg-gradient-to-r from-[#9855b9] to-[#c24285] hover:opacity-90 transition-opacity disabled:opacity-50 cursor-pointer">Test connection</button>
+            <button onClick={check} disabled={busy || !selected} className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-semibold text-white bg-neutral-950 hover:bg-neutral-800 active:bg-neutral-900 shadow-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer">Test connection</button>
             {readiness.message && <p className={`text-xs ${readiness.state === 'error' ? 'text-red-700' : readiness.state === 'ready' ? 'text-green-700' : 'text-neutral-500'}`}>{readiness.message}</p>}
           </div>
 
           <div>
-            <div className="flex items-center justify-between mb-2"><label className="text-xs font-medium text-neutral-700">Generated local configuration</label><button onClick={copy} disabled={!configText} className="text-xs font-medium text-neutral-700 border border-neutral-200 rounded-full px-3 py-1 hover:bg-neutral-50 disabled:opacity-50">Copy configuration</button></div>
+            <div className="flex items-center justify-between mb-2"><label className="text-xs font-medium text-neutral-700">Generated local configuration</label><button onClick={copy} disabled={!configText} className="text-xs font-medium text-neutral-700 border border-neutral-200 rounded-lg px-3 py-1.5 hover:bg-neutral-50 hover:border-neutral-300 disabled:opacity-50">Copy configuration</button></div>
             <pre className="rounded-xl bg-neutral-950 text-neutral-100 p-4 text-xs leading-5 overflow-x-auto min-h-[170px]">{configText || 'Select an active worker to generate configuration.'}</pre>
             <p className="text-[11px] text-neutral-400 mt-2">Run the MCP command from the Bagseven repository. The generated block contains only routing settings and the selected worker ID.</p>
             {startCommand && <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3"><div className="text-xs font-medium text-amber-900">Start MCP in another terminal</div><code className="block mt-1 text-[11px] leading-4 text-amber-900 break-all">{startCommand}</code></div>}
@@ -149,7 +149,7 @@ export function McpConnection({ session, client, agents, busy, run, toast }: Pro
               <p className="text-[11px] text-neutral-400 mt-2">Use the folder containing the root package.json. The generated command runs the existing <code>pnpm bagseven-mcp</code> script.</p>
             </div>
             <div>
-              <div className="flex items-center justify-between mb-2"><label className="text-xs font-medium text-neutral-700">Claude Desktop configuration</label><button onClick={copyClaude} disabled={!claudeConfigText} className="text-xs font-medium text-neutral-700 border border-neutral-200 rounded-full px-3 py-1 hover:bg-neutral-50 disabled:opacity-50">Copy configuration</button></div>
+              <div className="flex items-center justify-between mb-2"><label className="text-xs font-medium text-neutral-700">Claude Desktop configuration</label><button onClick={copyClaude} disabled={!claudeConfigText} className="text-xs font-medium text-neutral-700 border border-neutral-200 rounded-lg px-3 py-1.5 hover:bg-neutral-50 hover:border-neutral-300 disabled:opacity-50">Copy configuration</button></div>
               <pre className="rounded-xl bg-neutral-950 text-neutral-100 p-4 text-xs leading-5 overflow-x-auto min-h-[130px]">{claudeConfigText || 'Enter the repository path to generate the Claude Desktop configuration.'}</pre>
               <p className="text-[11px] text-neutral-400 mt-2">Paste this block into Claude Desktop’s <code>claude_desktop_config.json</code>. It contains the worker binding but no private or service credentials.</p>
             </div>

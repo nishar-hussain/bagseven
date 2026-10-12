@@ -34,10 +34,10 @@ export interface SectionProps {
 
 const Mono = ({ children }: { children: React.ReactNode }) => <span className="font-mono text-xs">{children}</span>;
 
-const card = 'bg-white rounded-2xl border border-neutral-200/80 p-6 shadow-[0_1px_3px_rgba(0,0,0,0.01)]';
-const input = 'w-full border border-neutral-200 rounded-xl px-3 py-2 text-sm text-neutral-900 outline-none bg-white focus:ring-2 focus:ring-neutral-900/10';
-const btn = 'px-5 py-2 rounded-full text-sm font-medium text-white bg-gradient-to-r from-[#9855b9] to-[#c24285] hover:opacity-90 transition-opacity disabled:opacity-50 cursor-pointer';
-const btnGhost = 'px-5 py-2 rounded-full text-sm font-medium text-neutral-700 border border-neutral-200/90 bg-white hover:bg-neutral-50 transition disabled:opacity-50 cursor-pointer';
+const card = 'bg-white rounded-xl border border-neutral-200 p-5 shadow-[0_1px_2px_rgba(15,23,42,0.04)]';
+const input = 'w-full border border-neutral-200 rounded-lg px-3 py-2.5 text-sm text-neutral-900 outline-none bg-white focus:border-neutral-400 focus:ring-2 focus:ring-neutral-900/10';
+const btn = 'inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-semibold text-white bg-neutral-950 hover:bg-neutral-800 active:bg-neutral-900 shadow-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer';
+const btnGhost = 'inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium text-neutral-700 border border-neutral-200 bg-white hover:bg-neutral-50 hover:border-neutral-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer';
 const agentRows = (value: unknown): Session['tree'] => (Array.isArray(value) ? value as Session['tree'] : []);
 
 export function OverviewSection(props: SectionProps) {
@@ -108,7 +108,7 @@ export function OverviewSection(props: SectionProps) {
     return (
       <div className="space-y-5">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-purple-600">Welcome to Bagseven</p>
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-neutral-500">Welcome to Bagseven</p>
           <h1 className="text-[28px] font-bold text-neutral-900 tracking-tight leading-tight mt-2">Create your first controlled agent</h1>
           <p className="text-sm text-neutral-500 mt-2 max-w-2xl">A mandate defines exactly how much your agents can spend. It is signed once, enforced by the smart contract, and can be connected to your local MCP agent.</p>
         </div>
@@ -119,7 +119,7 @@ export function OverviewSection(props: SectionProps) {
             ['3', 'Connect your agent', 'Bind an active worker to local MCP and test its tools.'],
           ].map(([number, title, description]) => (
             <div key={number} className="flex gap-3">
-              <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-purple-100 text-xs font-bold text-purple-700">{number}</span>
+              <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-neutral-900 text-xs font-bold text-white">{number}</span>
               <div><p className="text-sm font-semibold text-neutral-900">{title}</p><p className="text-xs leading-5 text-neutral-500 mt-1">{description}</p></div>
             </div>
           ))}
@@ -689,8 +689,8 @@ export function AgentsSection(props: SectionProps) {
         </div>
       </div>
 
-      <div className="flex items-start gap-5">
-        <div className="flex-1 min-w-0">
+      <div className="space-y-5">
+        <div className="min-w-0">
       <div className={card}>
         {/* Toolbar */}
         <div className="flex flex-wrap items-center justify-between gap-3">
@@ -756,16 +756,22 @@ export function AgentsSection(props: SectionProps) {
 
         {/* Detail panel */}
         {selected && (
-          <div className="w-[340px] shrink-0 space-y-4">
-            <div className={card}>
-              <div className="text-xs text-neutral-400">Agent</div>
-              <div className="text-sm font-semibold mt-1 break-all">{selected.operator_address}</div>
-              <div className="text-3xl font-bold text-neutral-900 mt-3">${money(0)}</div>
-              <div className="text-xs text-neutral-400 mt-1">Left to draw. Its window allows more than the vault holds.</div>
+          <div className="space-y-4">
+            <div className={`${card} grid items-center gap-5 lg:grid-cols-[minmax(0,1fr)_260px]`}>
+              <div>
+                <div className="text-xs font-semibold uppercase tracking-[0.14em] text-neutral-400">Selected agent</div>
+                <div className="text-sm font-semibold mt-1 break-all">{selected.operator_address}</div>
+                <div className="text-xs text-neutral-400 mt-1">Worker identity and spending permissions for this mandate.</div>
+              </div>
+              <div className="lg:border-l lg:border-neutral-100 lg:pl-5">
+                <div className="text-xs text-neutral-400">Available to draw</div>
+                <div className="text-3xl font-bold text-neutral-900 mt-1">${money(0)}</div>
+                <div className="text-xs text-neutral-400 mt-1">Limited by vault balance and mandate rules.</div>
+              </div>
             </div>
 
             <div className={card}>
-              <div className="grid gap-3 text-sm">
+              <div className="grid gap-x-8 gap-y-4 text-sm sm:grid-cols-2 xl:grid-cols-4">
                 <div><div className="text-xs text-neutral-400">Name</div><div className="mt-0.5">{selected.name ?? session.names?.[selected.id] ?? 'Unnamed — a name is bound from the console, not by the contract'}</div></div>
                 {selected.mcp_endpoint && <div><div className="text-xs text-neutral-400">MCP endpoint</div><div className="mt-0.5 font-mono text-xs break-all">{selected.mcp_endpoint}</div></div>}
                 <div><div className="text-xs text-neutral-400">Purpose</div><div className="mt-0.5">None stated</div></div>
@@ -775,17 +781,17 @@ export function AgentsSection(props: SectionProps) {
                 <div className="flex justify-between"><span className="text-neutral-500">Per seller</span><span className="font-semibold">{(session.mandate?.per_seller_pct ?? 0) / 100}% of a window</span></div>
                 <div className="flex justify-between"><span className="text-neutral-500">Window length</span><span className="font-semibold">{Math.round((session.mandate?.window_seconds ?? 0) / 3600)} hours</span></div>
                 <div className="flex justify-between"><span className="text-neutral-500">Depth</span><span className="font-semibold">{selected.depth} of {session.mandate?.max_depth}</span></div>
-                <div><div className="text-xs text-neutral-400">Operator</div><div className="mt-0.5 font-mono break-all">{selected.operator_address}</div></div>
+                <div className="sm:col-span-2"><div className="text-xs text-neutral-400">Operator</div><div className="mt-0.5 font-mono break-all">{selected.operator_address}</div></div>
                 <div className="flex justify-between"><span className="text-neutral-500">Parent</span><span className="font-semibold">{selected.parent_agent_id ? shortAddress(selected.parent_agent_id) : 'None — root'}</span></div>
                 <div className="flex justify-between"><span className="text-neutral-500">Children</span><span className="font-semibold">{(() => { const c = (tree ?? []).filter((x) => x.parent_agent_id === selected.id).length; return c === 0 ? 'None' : c; })()}</span></div>
-                <div><div className="text-xs text-neutral-400">Node id</div><div className="mt-0.5 font-mono text-xs break-all">{selected.id}</div></div>
+                <div className="sm:col-span-2 xl:col-span-4"><div className="text-xs text-neutral-400">Node id</div><div className="mt-0.5 font-mono text-xs break-all">{selected.id}</div></div>
               </div>
             </div>
 
-            <div className={card}>
-              <button onClick={() => spawnUnder(selected)} className={`${btn} w-full`}>＋ Spawn under this agent</button>
-              <div className="relative mt-2">
-                <button onClick={() => setMoreOpen(!moreOpen)} className={`${btnGhost} w-full`}>More ▾</button>
+            <div className={`${card} flex flex-wrap items-center gap-2`}>
+              <button onClick={() => spawnUnder(selected)} className={btn}>＋ Spawn under this agent</button>
+              <div className="relative">
+                <button onClick={() => setMoreOpen(!moreOpen)} className={btnGhost}>More ▾</button>
                 {moreOpen && (
                   <div className="absolute left-0 right-0 mt-1 rounded-xl border border-neutral-200 bg-white shadow-lg py-1 z-20">
                     {([

@@ -25,13 +25,9 @@ const nav: { id: Section; label: string; icon: string }[] = [
 
 function Brand() {
   return (
-    <div className="flex items-center gap-3 px-2">
-      <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-[#e0314b] shadow-sm">
-        <div className="grid grid-cols-2 gap-[3px]">
-          {Array.from({ length: 6 }).map((_, index) => <span key={index} className="h-1.5 w-1.5 rounded-full bg-white" />)}
-        </div>
-      </div>
-      <div><div className="text-[15px] font-bold tracking-tight text-neutral-950">Bagseven</div><div className="text-[10px] font-medium uppercase tracking-[0.14em] text-neutral-400">Controlled spending</div></div>
+    <div className="flex items-center gap-4 px-2">
+      <img src="/icon.svg" alt="" aria-hidden="true" className="h-12 w-12 shrink-0 rounded-xl shadow-[0_2px_6px_rgba(15,23,42,0.08)]" />
+      <div className="min-w-0"><div className="text-[22px] font-bold leading-none tracking-[-0.04em] text-neutral-950">Bagseven</div></div>
     </div>
   );
 }
@@ -39,7 +35,7 @@ function Brand() {
 function MandatePicker({ mandates, selectedMandateId, onMandateChange, onRefreshMandates }: Pick<HeaderProps, 'mandates' | 'selectedMandateId' | 'onMandateChange' | 'onRefreshMandates'>) {
   if (mandates.length === 0) return null;
   return (
-    <div className="rounded-2xl border border-neutral-200 bg-neutral-50/80 p-3">
+    <div className="rounded-xl border border-neutral-200 bg-neutral-50/80 p-3">
       <div className="mb-2 flex items-center justify-between"><span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-neutral-400">Workspace</span><button onClick={onRefreshMandates} className="rounded-md px-1.5 py-1 text-xs text-neutral-400 hover:bg-white hover:text-neutral-800" title="Refresh mandates" aria-label="Refresh mandates">↻</button></div>
       <select aria-label="Select mandate" value={selectedMandateId ?? ''} onChange={(event) => onMandateChange(event.target.value)} className="w-full truncate rounded-lg border border-neutral-200 bg-white px-2.5 py-2 text-xs font-medium text-neutral-800 outline-none focus:border-neutral-400 focus:ring-2 focus:ring-neutral-200">
         {mandates.map((mandate, index) => <option key={mandate.id} value={mandate.id}>Mandate {index + 1} · {mandate.contract_address?.slice(0, 8) ?? 'pending'}</option>)}
