@@ -106,11 +106,27 @@ export function OverviewSection(props: SectionProps) {
 
   if (!session.mandate) {
     return (
-      <div className="space-y-4">
-        <h1 className="text-[28px] font-bold text-neutral-900 tracking-tight leading-tight">Overview</h1>
-        <div className={`${card} flex flex-col items-center justify-center py-20 text-center`}>
-          <p className="text-sm text-neutral-500">No mandate yet.</p>
-          <p className="text-xs text-neutral-400 mt-1">Go to <b>Mandate</b> to sign your first one.</p>
+      <div className="space-y-5">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-purple-600">Welcome to Bagseven</p>
+          <h1 className="text-[28px] font-bold text-neutral-900 tracking-tight leading-tight mt-2">Create your first controlled agent</h1>
+          <p className="text-sm text-neutral-500 mt-2 max-w-2xl">A mandate defines exactly how much your agents can spend. It is signed once, enforced by the smart contract, and can be connected to your local MCP agent.</p>
+        </div>
+        <div className={`${card} grid gap-5 md:grid-cols-3`}>
+          {[
+            ['1', 'Create a mandate', 'Set the budget, purchase cap, and operator wallet.'],
+            ['2', 'Fund the vault', 'Deposit Polygon Amoy testnet USDC into the mandate vault.'],
+            ['3', 'Connect your agent', 'Bind an active worker to local MCP and test its tools.'],
+          ].map(([number, title, description]) => (
+            <div key={number} className="flex gap-3">
+              <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-purple-100 text-xs font-bold text-purple-700">{number}</span>
+              <div><p className="text-sm font-semibold text-neutral-900">{title}</p><p className="text-xs leading-5 text-neutral-500 mt-1">{description}</p></div>
+            </div>
+          ))}
+        </div>
+        <div className={`${card} flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4`}>
+          <div><p className="text-sm font-semibold text-neutral-900">Ready to begin?</p><p className="text-xs text-neutral-500 mt-1">Your connected wallet will sign the mandate. No private key is sent to the browser or agent.</p></div>
+          <button onClick={() => onNewMandate?.()} className={btn}>Create mandate</button>
         </div>
       </div>
     );

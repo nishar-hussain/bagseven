@@ -127,5 +127,15 @@
   }
   body {
     @apply bg-background text-foreground;
+    letter-spacing: -0.01em;
+  }
+
+  button, select, input, textarea {
+    font: inherit;
+  }
+
+  ::selection {
+    background: oklch(0.25 0.04 260);
+    color: white;
   }
 }

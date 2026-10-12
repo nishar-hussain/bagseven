@@ -137,9 +137,9 @@ export default function Page() {
   const sectionProps = { session, client, busy, persist, run, toast, onNavigate: (s: string) => setActiveSection(s as Section), onMandateCreated: () => refreshMandates(), forceCreateMandate: forceCreate, onConsumeMandateCreate: () => setForceCreate(false), onNewMandate: () => { setForceCreate(true); setActiveSection('mandate'); } };
 
   return (
-    <div className="min-h-screen bg-[#f5f6f8] text-[#111827] flex flex-col">
+    <div className="min-h-screen bg-[#f6f7f9] text-[#111827] flex flex-col lg:pl-64">
       <Header activeSection={activeSection} onSectionChange={setActiveSection} mandateExists={!!session.mandate} mandates={mandates} selectedMandateId={session.mandate?.mandate_id} onMandateChange={(id) => void selectMandate(id)} onRefreshMandates={() => void refreshMandates()} />
-      <main className="flex-1 max-w-[1100px] w-full mx-auto px-6 sm:px-8 py-7">
+      <main className="flex-1 max-w-[1320px] w-full mx-auto px-4 sm:px-8 lg:px-10 py-8">
         <div key={activeSection} className="animate-in fade-in duration-200">
           {activeSection === 'overview' && <OverviewSection {...sectionProps} />}
           {activeSection === 'mandate' && <MandateSection {...sectionProps} />}
