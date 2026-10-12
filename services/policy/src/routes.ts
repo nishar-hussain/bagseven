@@ -202,6 +202,33 @@ export function buildPolicyRoutes(app: FastifyInstance, { db, redis, config }: S
     return { mandate_id: mandateId, root_agent_id: rootAgentId, contract_address: contractAddress, status: 'active' };
   });
 
+  // Discover mandates owned by the connected wallet. Subsequent operations
+  // still use the selected mandate ID, so one owner cannot select another
+  // owner's mandate through this endpoint.
+  app.get('/v1/mandates', async (req) => {
+    const query = z.object({ owner_address: z.string().regex(/^0x[0-9a-fA-F]{40}$/) }).parse(req.query);
+    const rows = await db.query.mandates.findMany({
+      where: eq(mandates.ownerAddress, query.owner_address.toLowerCase()),
+      orderBy: desc(mandates.createdAt),
+    });
+    return {
+      mandates: rows.map((mandate) => ({
+        id: mandate.id,
+        owner_address: mandate.ownerAddress,
+        operator_address: mandate.operatorAddress,
+        contract_address: mandate.contractAddress,
+        budget_per_window: mandate.budgetPerWindow,
+        window_seconds: mandate.windowSeconds,
+        lifetime_cap: mandate.lifetimeCap,
+        per_purchase_cap: mandate.perPurchaseCap,
+        per_seller_pct: mandate.perSellerPct,
+        max_depth: mandate.maxDepth,
+        status: mandate.status,
+        created_at: mandate.createdAt,
+      })),
+    };
+  });
+
   app.get('/v1/mandates/:id', async (req) => {
     const { id } = req.params as { id: string };
     const mandate = await getMandate(id);

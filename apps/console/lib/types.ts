@@ -12,6 +12,21 @@ export interface MandateSession {
   max_depth: number;
 }
 
+export interface MandateSummary {
+  id: string;
+  owner_address: string;
+  operator_address: string;
+  contract_address: string | null;
+  budget_per_window: string;
+  window_seconds: number;
+  lifetime_cap: string;
+  per_purchase_cap: string;
+  per_seller_pct: number;
+  max_depth: number;
+  status?: string;
+  created_at?: string;
+}
+
 export interface AgentRow {
   id: string;
   operator_address: string;
