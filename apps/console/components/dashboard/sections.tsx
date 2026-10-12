@@ -26,6 +26,7 @@ export interface SectionProps {
   run: (name: string, fn: () => Promise<void>) => Promise<void>;
   toast: (kind: 'ok' | 'error' | 'info', message: string) => void;
   onNavigate?: (s: string) => void;
+  onMandateCreated?: () => Promise<void>;
   onNewMandate?: () => void;
   forceCreateMandate?: boolean;
   onConsumeMandateCreate?: () => void;
@@ -361,6 +362,7 @@ export function MandateSection(props: SectionProps) {
         signature,
       });
       persist({ ...session, operatorAddress: effectiveOperator, mandate: { mandate_id: m.mandate_id, root_agent_id: m.root_agent_id, contract_address: m.contract_address, owner_address: owner, operator_address: effectiveOperator, budget_per_window: budget, window_seconds: windowSeconds, lifetime_cap: lifetime, per_purchase_cap: perPurchase, per_seller_pct: Math.round(Number(sellerPct) * 100), max_depth: Number(maxDepth) } });
+      await props.onMandateCreated?.();
       toast('ok', `Mandate signed by ${shortAddress(owner)} — immutable`);
       onNavigate?.('overview');
     });

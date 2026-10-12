@@ -202,13 +202,22 @@ export function buildPolicyRoutes(app: FastifyInstance, { db, redis, config }: S
     return { mandate_id: mandateId, root_agent_id: rootAgentId, contract_address: contractAddress, status: 'active' };
   });
 
-  // Discover mandates owned by the connected wallet. Subsequent operations
-  // still use the selected mandate ID, so one owner cannot select another
-  // owner's mandate through this endpoint.
+  // Discover mandates for the console. Owner scope is the production-safe
+  // default; all-mandate discovery is deliberately limited to DEV_MODE for
+  // local testing and recovery.
   app.get('/v1/mandates', async (req) => {
-    const query = z.object({ owner_address: z.string().regex(/^0x[0-9a-fA-F]{40}$/) }).parse(req.query);
+    const query = z.object({
+      owner_address: z.string().regex(/^0x[0-9a-fA-F]{40}$/).optional(),
+      scope: z.enum(['owner', 'all']).default('owner'),
+    }).parse(req.query);
+    if (query.scope === 'all' && config.DEV_MODE !== 'true') {
+      throw new ApiError(403, 'ALL_MANDATES_DISABLED', 'all-mandate discovery is only available in development mode');
+    }
+    if (query.scope === 'owner' && !query.owner_address) {
+      throw new ApiError(400, 'OWNER_REQUIRED', 'owner_address is required for owner-scoped mandate discovery');
+    }
     const rows = await db.query.mandates.findMany({
-      where: eq(mandates.ownerAddress, query.owner_address.toLowerCase()),
+      where: query.scope === 'all' ? undefined : eq(mandates.ownerAddress, query.owner_address!.toLowerCase()),
       orderBy: desc(mandates.createdAt),
     });
     return {

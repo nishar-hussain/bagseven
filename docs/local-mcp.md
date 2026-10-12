@@ -108,3 +108,88 @@ Set `MCP_SMOKE_BLOCKED_URL` as well to exercise a denied resource. The command
 prints the raw MCP results, including any decision, reservation ID, and
 transaction hash returned by the daemon. It does not fabricate a provider,
 payment, or success result.
+
+## 8. Connect Claude Desktop on macOS
+
+Bagseven uses Claude Desktop's local stdio MCP transport for this integration.
+Do not use the HTTP URL in the Claude Desktop configuration. The HTTP transport
+at `http://127.0.0.1:4009/v1/mcp` remains available for the custom agent and
+health check.
+
+### Start the local services
+
+From the repository root, start the database dependencies and the existing
+services in this order:
+
+1. PostgreSQL and Redis: `pnpm db:up`
+2. Policy service on `:4003`
+3. Daemon on `:4001`
+4. A worker-bound MCP process using the selected worker ID
+5. Claude Desktop
+
+Start the stdio MCP manually once to validate the worker binding:
+
+```bash
+cd /absolute/path/to/bagseven
+BAGSEVEN_MCP_WORKER=<selected-worker-id> \
+DAEMON_URL=http://127.0.0.1:4001 \
+pnpm bagseven-mcp
+```
+
+The stdio process should print `stdio server ready` on stderr. Do not set
+`BAGSEVEN_MCP_PORT` for the Claude Desktop process; that variable switches the
+same server to HTTP mode.
+
+### Configure Claude Desktop
+
+The macOS configuration file is:
+
+```text
+~/Library/Application Support/Claude/claude_desktop_config.json
+```
+
+In the console's **Connect Claude Desktop** section, enter the absolute path
+to this repository and copy the generated JSON. It has this shape, with the
+actual worker ID and path supplied by the console:
+
+```json
+{
+  "mcpServers": {
+    "bagseven": {
+      "command": "pnpm",
+      "args": ["--dir", "/absolute/path/to/bagseven", "bagseven-mcp"],
+      "env": {
+        "BAGSEVEN_MCP_WORKER": "<selected-worker-id>",
+        "DAEMON_URL": "http://127.0.0.1:4001"
+      }
+    }
+  }
+}
+```
+
+If the file already contains other MCP servers, merge the `bagseven` entry
+instead of replacing the whole file. Never put `DAEMON_OPERATOR_KEY`,
+`DAEMON_EXECUTOR_KEY`, `BAGSEVEN_X402_PAYER_KEY`, `MCP_AUTH_TOKEN`, or
+`DAEMON_AUTH_TOKEN` into this JSON or into a Claude prompt. The MCP process
+loads local service configuration from the repository environment.
+
+After saving the file, completely quit Claude Desktop with `Cmd+Q` and reopen
+it. Claude Desktop must be restarted after every configuration change. The
+Bagseven console's **Test connection** button validates the local HTTP MCP
+process; it does not launch Claude Desktop.
+
+### Verify the tools
+
+In Claude Desktop, ask it to call `bagseven_status`, then ask it to search with
+`bagseven_search`. Use `bagseven_fetch` only with a permitted Polygon Amoy
+resource. Confirm the returned worker ID matches the selected worker and verify
+any payment transaction independently. The repository can validate MCP tool
+discovery without Claude Desktop using:
+
+```bash
+pnpm mcp:smoke
+```
+
+This is an MCP client smoke test, not proof that Claude Desktop itself was
+launched. No Claude Desktop session is automatically testable from the
+console or CI.

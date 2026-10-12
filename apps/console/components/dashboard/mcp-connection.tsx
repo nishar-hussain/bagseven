@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { buildLocalMcpConfig, localMcpUrl } from '../../lib/mcp';
+import { buildClaudeDesktopConfig, buildLocalMcpConfig, localMcpUrl } from '../../lib/mcp';
 import type { AgentRow, Session } from '../../lib/types';
 import { Client } from '../../lib/client';
 
@@ -22,6 +22,7 @@ type Readiness = {
 export function McpConnection({ session, client, agents, busy, run, toast }: Props) {
   const activeAgents = useMemo(() => agents.filter((agent) => agent.status === 'active'), [agents]);
   const [selectedId, setSelectedId] = useState('');
+  const [repositoryPath, setRepositoryPath] = useState('');
   const [readiness, setReadiness] = useState<Readiness>({ state: 'idle' });
 
   useEffect(() => {
@@ -34,6 +35,10 @@ export function McpConnection({ session, client, agents, busy, run, toast }: Pro
   const selected = activeAgents.find((agent) => agent.id === selectedId);
   const config = selected ? buildLocalMcpConfig({ workerId: selected.id }) : null;
   const configText = config ? JSON.stringify(config, null, 2) : '';
+  const claudeConfig = selected && repositoryPath.trim()
+    ? buildClaudeDesktopConfig({ workerId: selected.id, repositoryPath: repositoryPath.trim() })
+    : null;
+  const claudeConfigText = claudeConfig ? JSON.stringify(claudeConfig, null, 2) : '';
   const startCommand = selected
     ? `BAGSEVEN_MCP_WORKER=${selected.id} BAGSEVEN_MCP_PORT=4009 DAEMON_URL=http://127.0.0.1:4001 pnpm bagseven-mcp`
     : '';
@@ -42,6 +47,12 @@ export function McpConnection({ session, client, agents, busy, run, toast }: Pro
     if (!configText) return;
     await navigator.clipboard.writeText(configText);
     toast('ok', 'Local MCP configuration copied');
+  };
+
+  const copyClaude = async () => {
+    if (!claudeConfigText) return;
+    await navigator.clipboard.writeText(claudeConfigText);
+    toast('ok', 'Claude Desktop configuration copied');
   };
 
   const check = () => run('check MCP connection', async () => {
@@ -112,6 +123,36 @@ export function McpConnection({ session, client, agents, busy, run, toast }: Pro
             <pre className="rounded-xl bg-neutral-950 text-neutral-100 p-4 text-xs leading-5 overflow-x-auto min-h-[170px]">{configText || 'Select an active worker to generate configuration.'}</pre>
             <p className="text-[11px] text-neutral-400 mt-2">Run the MCP command from the Bagseven repository. The generated block contains only routing settings and the selected worker ID.</p>
             {startCommand && <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3"><div className="text-xs font-medium text-amber-900">Start MCP in another terminal</div><code className="block mt-1 text-[11px] leading-4 text-amber-900 break-all">{startCommand}</code></div>}
+          </div>
+        </div>
+      )}
+
+      {selected && (
+        <div className="mt-6 border-t border-neutral-100 pt-5">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h3 className="text-sm font-semibold text-neutral-900">Connect Claude Desktop</h3>
+              <p className="text-xs text-neutral-500 mt-1 max-w-2xl">Claude Desktop uses Bagseven’s existing stdio MCP transport. Enter the absolute path to this Bagseven repository; secrets remain in the local .env file.</p>
+            </div>
+            <span className="text-xs rounded-full bg-neutral-100 px-3 py-1 text-neutral-600">stdio · local only</span>
+          </div>
+          <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]">
+            <div>
+              <label className="text-xs font-medium text-neutral-700 block">Bagseven repository path</label>
+              <input
+                className="mt-1.5 w-full border border-neutral-200 rounded-xl px-3 py-2 text-sm text-neutral-900 bg-white"
+                value={repositoryPath}
+                onChange={(event) => setRepositoryPath(event.target.value)}
+                placeholder="/Users/your-name/bagseven"
+                spellCheck={false}
+              />
+              <p className="text-[11px] text-neutral-400 mt-2">Use the folder containing the root package.json. The generated command runs the existing <code>pnpm bagseven-mcp</code> script.</p>
+            </div>
+            <div>
+              <div className="flex items-center justify-between mb-2"><label className="text-xs font-medium text-neutral-700">Claude Desktop configuration</label><button onClick={copyClaude} disabled={!claudeConfigText} className="text-xs font-medium text-neutral-700 border border-neutral-200 rounded-full px-3 py-1 hover:bg-neutral-50 disabled:opacity-50">Copy configuration</button></div>
+              <pre className="rounded-xl bg-neutral-950 text-neutral-100 p-4 text-xs leading-5 overflow-x-auto min-h-[130px]">{claudeConfigText || 'Enter the repository path to generate the Claude Desktop configuration.'}</pre>
+              <p className="text-[11px] text-neutral-400 mt-2">Paste this block into Claude Desktop’s <code>claude_desktop_config.json</code>. It contains the worker binding but no private or service credentials.</p>
+            </div>
           </div>
         </div>
       )}

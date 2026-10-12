@@ -12,6 +12,7 @@ interface HeaderProps {
   mandates: MandateSummary[];
   selectedMandateId?: string;
   onMandateChange: (id: string) => void;
+  onRefreshMandates: () => void;
 }
 
 const nav: { id: Section; label: string }[] = [
@@ -22,7 +23,7 @@ const nav: { id: Section; label: string }[] = [
   { id: 'resolve', label: 'Resolve' },
 ];
 
-export function Header({ activeSection, onSectionChange, mandateExists, mandates, selectedMandateId, onMandateChange }: HeaderProps) {
+export function Header({ activeSection, onSectionChange, mandateExists, mandates, selectedMandateId, onMandateChange, onRefreshMandates }: HeaderProps) {
   const visibleNav = mandateExists ? nav.filter((n) => n.id !== 'mandate') : nav;
 
   return (
@@ -62,18 +63,21 @@ export function Header({ activeSection, onSectionChange, mandateExists, mandates
 
       <div className="flex items-center gap-3">
         {mandates.length > 0 && (
-          <select
-            aria-label="Select mandate"
-            value={selectedMandateId ?? ''}
-            onChange={(event) => onMandateChange(event.target.value)}
-            className="max-w-[220px] rounded-full border border-neutral-200 bg-white px-3 py-1.5 text-xs text-neutral-700"
-          >
-            {mandates.map((mandate, index) => (
-              <option key={mandate.id} value={mandate.id}>
-                Mandate {index + 1} · {mandate.status ?? 'active'}
-              </option>
-            ))}
-          </select>
+          <>
+            <select
+              aria-label="Select mandate"
+              value={selectedMandateId ?? ''}
+              onChange={(event) => onMandateChange(event.target.value)}
+              className="max-w-[250px] rounded-full border border-neutral-200 bg-white px-3 py-1.5 text-xs text-neutral-700"
+            >
+              {mandates.map((mandate, index) => (
+                <option key={mandate.id} value={mandate.id}>
+                  Mandate {index + 1} · {mandate.contract_address?.slice(0, 8) ?? 'pending'} · {mandate.status ?? 'active'}
+                </option>
+              ))}
+            </select>
+            <button onClick={onRefreshMandates} className="rounded-full border border-neutral-200 bg-white px-2.5 py-1.5 text-xs text-neutral-600 hover:bg-neutral-50" title="Refresh mandates" aria-label="Refresh mandates">↻</button>
+          </>
         )}
         <ConnectButton.Custom>
           {({ account, chain, openConnectModal, mounted }) => {

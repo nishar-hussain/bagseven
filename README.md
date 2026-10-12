@@ -73,6 +73,8 @@ BAGSEVEN_MCP_PORT=4009 pnpm bagseven-mcp
 
 The MCP tools are `bagseven_status`, `bagseven_fetch`, and `bagseven_spawn`. The daemon uses `DAEMON_OPERATOR_KEY` and `DAEMON_OWNER_KEY` in development; production must use managed custody such as HSM, MPC, or a smart account.
 
+For local Claude Desktop setup on macOS, see [docs/local-mcp.md](docs/local-mcp.md#8-connect-claude-desktop-on-macos). Claude uses the existing stdio MCP transport and remains bound to one configured worker.
+
 Each MCP process is bound to exactly one worker. Set `BAGSEVEN_MCP_WORKER` before starting it. Paid providers must be registered in `BAGSEVEN_PROVIDER_KEYS` as a JSON object mapping hostnames to provider signing addresses; the daemon verifies the signed 402 challenge, expiry, chain, token, and nonce before requesting payment.
 
 For durable registration, an administrator can call `POST /v1/providers` with `PROVIDER_ADMIN_TOKEN`; the daemon resolves registered providers through `GET /v1/providers/:hostname` when they are not present in the local configuration.

@@ -28,6 +28,19 @@ export default function Page() {
 
   const persist = useCallback((s: Session) => setSession(s), []);
 
+  const refreshMandates = useCallback(async () => {
+    if (!address) return;
+    try {
+      const { mandates: rows } = await client.listMandates(address, 'all');
+      setMandates(rows);
+    } catch {
+      // Older policy processes do not know the development-only `all` scope.
+      // Fall back to owner scope so the selector can still update immediately.
+      const { mandates: rows } = await client.listMandates(address, 'owner');
+      setMandates(rows);
+    }
+  }, [address, client]);
+
   const toast = useCallback((kind: Toast['kind'], message: string) => {
     const id = nextId();
     setToasts((t) => [...t, { id, kind, message }]);
@@ -82,7 +95,7 @@ export default function Page() {
   // the selector immediately instead of leaving the old list in memory.
   useEffect(() => {
     if (!restored || !address) return;
-    client.listMandates(address).then(({ mandates: rows }) => {
+    client.listMandates(address, 'all').then(({ mandates: rows }) => {
       setMandates(rows);
       if (rows.length === 0) return;
       if (!session.mandate || !rows.some((row) => row.id === session.mandate?.mandate_id)) {
@@ -121,11 +134,11 @@ export default function Page() {
     setActiveSection('overview');
   }, [client]);
 
-  const sectionProps = { session, client, busy, persist, run, toast, onNavigate: (s: string) => setActiveSection(s as Section), forceCreateMandate: forceCreate, onConsumeMandateCreate: () => setForceCreate(false), onNewMandate: () => { setForceCreate(true); setActiveSection('mandate'); } };
+  const sectionProps = { session, client, busy, persist, run, toast, onNavigate: (s: string) => setActiveSection(s as Section), onMandateCreated: () => refreshMandates(), forceCreateMandate: forceCreate, onConsumeMandateCreate: () => setForceCreate(false), onNewMandate: () => { setForceCreate(true); setActiveSection('mandate'); } };
 
   return (
     <div className="min-h-screen bg-[#f5f6f8] text-[#111827] flex flex-col">
-      <Header activeSection={activeSection} onSectionChange={setActiveSection} mandateExists={!!session.mandate} mandates={mandates} selectedMandateId={session.mandate?.mandate_id} onMandateChange={(id) => void selectMandate(id)} />
+      <Header activeSection={activeSection} onSectionChange={setActiveSection} mandateExists={!!session.mandate} mandates={mandates} selectedMandateId={session.mandate?.mandate_id} onMandateChange={(id) => void selectMandate(id)} onRefreshMandates={() => void refreshMandates()} />
       <main className="flex-1 max-w-[1100px] w-full mx-auto px-6 sm:px-8 py-7">
         <div key={activeSection} className="animate-in fade-in duration-200">
           {activeSection === 'overview' && <OverviewSection {...sectionProps} />}

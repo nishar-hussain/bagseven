@@ -40,8 +40,10 @@ export class Client {
   createMandate(input: Record<string, unknown>) {
     return this.request<{ mandate_id: string; root_agent_id: string; contract_address: string; status: string }>('POST', '/v1/mandates', input);
   }
-  listMandates(ownerAddress: string) {
-    return this.request<{ mandates: import('./types').MandateSummary[] }>('GET', `/v1/mandates?owner_address=${encodeURIComponent(ownerAddress)}`);
+  listMandates(ownerAddress?: string, scope: 'owner' | 'all' = 'owner') {
+    const query = new URLSearchParams({ scope });
+    if (ownerAddress) query.set('owner_address', ownerAddress);
+    return this.request<{ mandates: import('./types').MandateSummary[] }>('GET', `/v1/mandates?${query.toString()}`);
   }
   getMandate(id: string) {
     return this.request<Record<string, unknown>>('GET', `/v1/mandates/${id}`);
