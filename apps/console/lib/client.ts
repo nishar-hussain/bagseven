@@ -19,11 +19,16 @@ export class Client {
   }
 
   private async request<T>(method: string, path: string, body?: unknown): Promise<T> {
-    const res = await fetch(`${this.baseUrl}${path}`, {
-      method,
-      headers: body === undefined ? undefined : { 'content-type': 'application/json' },
-      body: body === undefined ? undefined : JSON.stringify(body),
-    });
+    let res: Response;
+    try {
+      res = await fetch(`${this.baseUrl}${path}`, {
+        method,
+        headers: body === undefined ? undefined : { 'content-type': 'application/json' },
+        body: body === undefined ? undefined : JSON.stringify(body),
+      });
+    } catch (error) {
+      throw new ApiError(503, 'SERVICE_UNAVAILABLE', `Bagseven gateway is unreachable at ${this.baseUrl}: ${(error as Error).message}`);
+    }
     const text = await res.text();
     const parsed = text ? JSON.parse(text) : undefined;
     if (!res.ok) {

@@ -96,6 +96,7 @@ function mandateClient(config: NodeJS.ProcessEnv): MandateClient {
   if (!key) throw new ApiError(503, 'ENFORCER_UNCONFIGURED', 'DAEMON_EXECUTOR_KEY (or legacy ENFORCER_DEV_KEY) not set');
   return new MandateClient(key as `0x${string}`, {
     rpcUrl: config.RPC_URL ?? 'http://localhost:8545',
+    rpcFallbackUrl: config.RPC_FALLBACK_URL,
     chainId: Number(config.CHAIN_ID ?? 80002),
   });
 }
@@ -106,6 +107,7 @@ function ownerClient(config: NodeJS.ProcessEnv): MandateClient {
   if (!key) throw new ApiError(503, 'OWNER_KEY_UNCONFIGURED', 'DAEMON_OWNER_KEY (or legacy OWNER_DEV_KEY) not set');
   return new MandateClient(key as `0x${string}`, {
     rpcUrl: config.RPC_URL ?? 'http://localhost:8545',
+    rpcFallbackUrl: config.RPC_FALLBACK_URL,
     chainId: Number(config.CHAIN_ID ?? 80002),
   });
 }
@@ -267,13 +269,24 @@ export function buildPolicyRoutes(app: FastifyInstance, { db, redis, config }: S
     const mandate = await getMandate(id);
     const client = mandateClient(config);
     const contract = mandate.contractAddress as Address | null;
-    const [vault, windowSpent, lifetimeSpent] = contract
-      ? await Promise.all([client.vaultBalance(contract), client.spendState(contract), client.lifetimeSpent(contract)])
-      : [0n, 0n, 0n];
+    let vault = 0n;
+    let windowSpent = 0n;
+    let lifetimeSpent = 0n;
+    if (contract) {
+      try {
+        [vault, windowSpent, lifetimeSpent] = await Promise.all([
+          client.vaultBalance(contract),
+          client.spendState(contract),
+          client.lifetimeSpent(contract),
+        ]);
+      } catch (error) {
+        throw new ApiError(502, 'CHAIN_READ_FAILED', `unable to read mandate contract state: ${(error as Error).message}`);
+      }
+    }
 
     const windowLeft = sub(mandate.budgetPerWindow, fromUnits(windowSpent));
     const lifetimeLeft = sub(mandate.lifetimeCap, fromUnits(lifetimeSpent));
-    const canDraw = Math.min(Number(vault), Number(windowLeft), Number(lifetimeLeft)).toFixed(2);
+    const canDraw = Math.max(0, Math.min(Number(fromUnits(vault)), Number(windowLeft), Number(lifetimeLeft))).toFixed(2);
 
     const tree = await db.query.agents.findMany({ where: eq(agents.mandateId, id) });
     const recentRefusals = await db.query.refusals.findMany({

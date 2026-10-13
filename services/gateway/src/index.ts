@@ -2,7 +2,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { randomUUID } from 'node:crypto';
 import { createDb } from '@bagseven/db';
 import { Redis } from 'ioredis';
-import { rateLimit, createService } from '@bagseven/server';
+import { ApiError, rateLimit, createService } from '@bagseven/server';
 import cors from '@fastify/cors';
 
 async function proxy(req: FastifyRequest, reply: FastifyReply, cfg: NodeJS.ProcessEnv): Promise<unknown> {
@@ -15,7 +15,12 @@ async function proxy(req: FastifyRequest, reply: FastifyReply, cfg: NodeJS.Proce
   if (typeof req.headers['content-type'] === 'string') headers['content-type'] = req.headers['content-type'];
   if (typeof req.headers['idempotency-key'] === 'string') headers['idempotency-key'] = req.headers['idempotency-key'];
 
-  const res = await fetch(`${baseUrl}${req.url}`, { method: req.method, headers, body });
+  let res: Response;
+  try {
+    res = await fetch(`${baseUrl}${req.url}`, { method: req.method, headers, body });
+  } catch (error) {
+    throw new ApiError(503, 'UPSTREAM_UNAVAILABLE', `policy service is unreachable at ${baseUrl}: ${(error as Error).message}`);
+  }
   const text = await res.text();
   const payload = text ? JSON.parse(text) : undefined;
   reply.code(res.status);

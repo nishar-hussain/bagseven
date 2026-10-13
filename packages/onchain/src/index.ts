@@ -1,6 +1,7 @@
 import {
   createPublicClient,
   createWalletClient,
+  fallback,
   http,
   decodeErrorResult,
   recoverMessageAddress,
@@ -44,6 +45,7 @@ export interface MandateCaps {
 
 export interface MandateClientOpts {
   rpcUrl: string;
+  rpcFallbackUrl?: string;
   chainId?: number;
 }
 
@@ -56,10 +58,16 @@ export class MandateClient {
 
   constructor(privateKey: Hex, opts: MandateClientOpts) {
     const chain = opts.chainId === 80002 ? polygonAmoy : opts.chainId === 31337 ? localChain : undefined;
-    this.publicClient = createPublicClient({ chain, transport: http(opts.rpcUrl) });
+    const transport = opts.rpcFallbackUrl && opts.rpcFallbackUrl !== opts.rpcUrl
+      ? fallback([
+        http(opts.rpcUrl, { retryCount: 2, retryDelay: 500 }),
+        http(opts.rpcFallbackUrl, { retryCount: 2, retryDelay: 750 }),
+      ])
+      : http(opts.rpcUrl, { retryCount: 2, retryDelay: 500 });
+    this.publicClient = createPublicClient({ chain, transport });
     const account = privateKeyToAccount(privateKey);
     this.address = account.address;
-    this.wallet = createWalletClient({ account, chain, transport: http(opts.rpcUrl) });
+    this.wallet = createWalletClient({ account, chain, transport });
   }
 
   async deploy(caps: MandateCaps): Promise<Address> {
