@@ -6,7 +6,7 @@
  * overview / resolve / withdraw.
  *
  * Usage: pnpm exec tsx scripts/e2e-bagseven.ts
- * Requires: gateway + mandate service up, .env pointed at Polygon Amoy (real USDC),
+ * Requires: gateway + mandate service up, .env pointed at a configured supported testnet,
  * and the master/enforcer wallet funded with Amoy POL + USDC.
  */
 import { readFileSync } from 'node:fs';

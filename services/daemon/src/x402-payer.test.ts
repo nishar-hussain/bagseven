@@ -47,7 +47,17 @@ describe('isolated x402 payer', () => {
     expect(paymentResult.amount).toBe(10000n);
   });
 
-  it('rejects non-Polygon-Amoy payer configuration', () => {
-    expect(() => new X402Payer({ key: '0x0123456789012345678901234567890123456789012345678901234567890123', rpcUrl: 'http://127.0.0.1:8545', chainId: 11155111, usdc: requirement.asset })).toThrow('Polygon Amoy');
+  it('rejects unsupported payer chain configuration', () => {
+    expect(() => new X402Payer({ key: '0x0123456789012345678901234567890123456789012345678901234567890123', rpcUrl: 'http://127.0.0.1:8545', chainId: 11155111, usdc: requirement.asset })).toThrow('unsupported chain id');
+  });
+
+  it('supports Avalanche Fuji payer configuration', async () => {
+    const payer = new X402Payer({
+      key: '0x0123456789012345678901234567890123456789012345678901234567890123',
+      rpcUrl: 'http://127.0.0.1:8545',
+      chainId: 43113,
+      usdc: '0x5425890298aed601595a70AB815c96711a31Bc65',
+    });
+    expect(payer.account.address).toMatch(/^0x[0-9a-fA-F]{40}$/);
   });
 });

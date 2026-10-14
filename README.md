@@ -220,4 +220,8 @@ faucet. To use real Polygon Amoy, set `SIGNER_MODE=real` with your funded key +
 2. Set `CHAIN_ID=80002`, `RPC_URL=https://polygon-amoy.drpc.org`, `USDC_ADDRESS=0x41E94Eb019C0762f9Bfcf9Fb1E58725BfB0e7582`, and `TREASURY_MASTER_PRIVATE_KEY` to the funded deployer key.
 3. Restart and create a mandate from the console. The policy service deploys `BagMandate` directly on Polygon Amoy. Verify the deployment and payment hashes on the [Amoy PolygonScan explorer](https://amoy.polygonscan.com).
 
+### Test on Avalanche Fuji
+
+Avalanche Fuji is also supported as a configured testnet. See [`docs/avalanche-fuji.md`](docs/avalanche-fuji.md) for the Fuji RPC, USDC, environment switch, and deployment flow. To deploy a standalone Fuji test mandate, run `DEPLOY_CHAIN_ID=43113 pnpm deploy:bagmandate`.
+
 > Note: `real` mode uses derived software keys (`eoa` custody type). This is correct for testnet and local verification; production custody should swap in MPC/smart-account custody behind the same `Signer` interface — the reservation/policy code does not change.

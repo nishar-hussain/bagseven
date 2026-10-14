@@ -8,6 +8,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { McpConnection } from './mcp-connection';
 import {
   CHAIN_ID,
+  CHAIN_NAME,
   fundFromContract,
   mandateCanonical,
   sendNativeEth,
@@ -77,7 +78,7 @@ export function OverviewSection(props: SectionProps) {
     run('withdraw', async () => {
       if (!session.mandate) throw new Error('sign a mandate first');
       if (!owner) throw new Error('connect your wallet first');
-      // Owner signs + submits the contract withdraw directly on-chain (Polygon Amoy).
+      // Owner signs + submits the contract withdraw directly on the selected testnet.
       const tx = await withdrawFromContract(session.mandate.contract_address, withdrawAmt, owner);
       persist({ ...session });
       setWithdrawOpen(false);
@@ -115,7 +116,7 @@ export function OverviewSection(props: SectionProps) {
         <div className={`${card} grid gap-5 md:grid-cols-3`}>
           {[
             ['1', 'Create a mandate', 'Set the budget, purchase cap, and operator wallet.'],
-            ['2', 'Fund the vault', 'Deposit Polygon Amoy testnet USDC into the mandate vault.'],
+            ['2', 'Fund the vault', `Deposit ${CHAIN_NAME} testnet USDC into the mandate vault.`],
             ['3', 'Connect your agent', 'Bind an active worker to local MCP and test its tools.'],
           ].map(([number, title, description]) => (
             <div key={number} className="flex gap-3">
@@ -979,7 +980,7 @@ export function ResolveSection(props: SectionProps) {
     <div className="space-y-4">
       <div>
         <h1 className="text-[24px] font-bold text-neutral-900 tracking-tight leading-tight">Resolve an agent</h1>
-        <p className="text-[13px] text-neutral-500 mt-1 max-w-xl leading-relaxed">A name, or the address in a payment. The name says which contract to ask; the contract says what the agent may still spend. On Polygon Amoy, where this testnet deployment lives.</p>
+        <p className="text-[13px] text-neutral-500 mt-1 max-w-xl leading-relaxed">A name, or the address in a payment. The name says which contract to ask; the contract says what the agent may still spend. On {CHAIN_NAME}, where this testnet deployment lives.</p>
       </div>
       <div className={card}>
         <div className="flex items-center gap-2">

@@ -14,7 +14,7 @@ import {
 import { keccak256, stringToHex } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import { defineChain } from 'viem';
-import { polygonAmoy } from 'viem/chains';
+import { avalancheFuji, polygonAmoy } from 'viem/chains';
 import { BagMandateAbi } from './abi.js';
 import { BagMandateBytecode } from './bytecode.js';
 
@@ -49,6 +49,39 @@ export interface MandateClientOpts {
   chainId?: number;
 }
 
+export const SUPPORTED_CHAIN_IDS = [80002, 43113] as const;
+export type SupportedChainId = (typeof SUPPORTED_CHAIN_IDS)[number];
+
+export const chainConfig = {
+  80002: {
+    id: 80002,
+    name: 'Polygon Amoy',
+    network: 'eip155:80002',
+    nativeSymbol: 'POL',
+    defaultRpcUrl: 'https://polygon-amoy.drpc.org',
+    usdc: '0x41E94Eb019C0762f9Bfcf9Fb1E58725BfB0e7582',
+  },
+  43113: {
+    id: 43113,
+    name: 'Avalanche Fuji',
+    network: 'eip155:43113',
+    nativeSymbol: 'AVAX',
+    defaultRpcUrl: 'https://api.avax-test.network/ext/bc/C/rpc',
+    usdc: '0x5425890298aed601595a70AB815c96711a31Bc65',
+  },
+} as const;
+
+export function chainForId(chainId: number) {
+  if (chainId === 80002) return polygonAmoy;
+  if (chainId === 43113) return avalancheFuji;
+  throw new Error(`unsupported chain id ${chainId}; expected Polygon Amoy (80002) or Avalanche Fuji (43113)`);
+}
+
+export function chainConfigForId(chainId: number) {
+  if (chainId === 80002 || chainId === 43113) return chainConfig[chainId];
+  throw new Error(`unsupported chain id ${chainId}; expected Polygon Amoy (80002) or Avalanche Fuji (43113)`);
+}
+
 const abi: any = BagMandateAbi as any;
 
 export class MandateClient {
@@ -57,7 +90,7 @@ export class MandateClient {
   readonly address: Address;
 
   constructor(privateKey: Hex, opts: MandateClientOpts) {
-    const chain = opts.chainId === 80002 ? polygonAmoy : opts.chainId === 31337 ? localChain : undefined;
+    const chain = opts.chainId === 31337 ? localChain : chainForId(opts.chainId ?? 80002);
     const transport = opts.rpcFallbackUrl && opts.rpcFallbackUrl !== opts.rpcUrl
       ? fallback([
         http(opts.rpcUrl, { retryCount: 2, retryDelay: 500 }),

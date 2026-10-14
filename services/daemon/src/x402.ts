@@ -3,6 +3,7 @@ import type { PaymentRequired } from '@x402/core/types';
 import { ApiError } from '@bagseven/server';
 
 export const POLYGON_AMOY_NETWORK = 'eip155:80002';
+export const AVALANCHE_FUJI_NETWORK = 'eip155:43113';
 
 export interface X402Requirements {
   x402Version: 2;
@@ -54,15 +55,16 @@ export function decodeX402PaymentRequired(header?: string | null, body?: unknown
   return body as PaymentRequired;
 }
 
-/** Select and validate the Polygon Amoy USDC exact payment option. */
+/** Select and validate an exact USDC payment option for the configured EVM testnet. */
 export function selectX402Requirements(
   payment: PaymentRequired,
   expectedAsset: `0x${string}`,
+  expectedNetwork = POLYGON_AMOY_NETWORK,
 ): X402Requirements {
   if (payment.x402Version !== 2) throw new ApiError(501, 'X402_VERSION_UNSUPPORTED', `x402 version ${payment.x402Version} is not supported`);
-  const option = payment.accepts?.find((candidate) => candidate.scheme === 'exact' && candidate.network === POLYGON_AMOY_NETWORK && candidate.asset.toLowerCase() === expectedAsset.toLowerCase());
+  const option = payment.accepts?.find((candidate) => candidate.scheme === 'exact' && candidate.network === expectedNetwork && candidate.asset.toLowerCase() === expectedAsset.toLowerCase());
   if (!option) {
-    throw new ApiError(501, 'X402_REQUIREMENT_UNSUPPORTED', 'provider has no exact Polygon Amoy payment option for the configured USDC token', { accepts: payment.accepts });
+    throw new ApiError(501, 'X402_REQUIREMENT_UNSUPPORTED', `provider has no exact ${expectedNetwork} payment option for the configured USDC token`, { accepts: payment.accepts });
   }
   if (!isAddress(option.payTo)) throw new ApiError(502, 'X402_INVALID_RECIPIENT', 'x402 payTo is not a valid EVM address');
   const amount = parseAtomicAmount(option.amount);
@@ -83,7 +85,7 @@ export function validateX402AgainstPolicy(requirement: X402Requirements, limits:
 
 /**
  * Kept as an explicit guard for deployments that have not configured the
- * isolated Polygon Amoy payer. A BagMandate vault is not itself an EIP-3009
+ * isolated testnet payer. A BagMandate vault is not itself an EIP-3009
  * payer; the daemon must never silently fall back to the operator or enforcer.
  */
 export function assertVaultSupportsEip3009(): never {

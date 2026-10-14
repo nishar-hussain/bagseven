@@ -23,6 +23,11 @@ describe('x402 v2 Polygon Amoy adapter', () => {
     expect(selectX402Requirements(decoded, asset)).toMatchObject({ network: 'eip155:80002', amount: '10000', payTo, asset });
   });
 
+  it('selects exact USDC on Avalanche Fuji when configured', () => {
+    const fujiPayment = { ...payment, accepts: [{ ...payment.accepts[0], network: 'eip155:43113', asset: '0x5425890298aed601595a70AB815c96711a31Bc65' }] } as PaymentRequired;
+    expect(selectX402Requirements(fujiPayment, '0x5425890298aed601595a70AB815c96711a31Bc65', 'eip155:43113')).toMatchObject({ network: 'eip155:43113', amount: '10000' });
+  });
+
   it('rejects unsupported networks', () => {
     const unsupported = { ...payment, accepts: [{ ...payment.accepts[0], network: 'eip155:11155111' }] } as PaymentRequired;
     expectCode(() => selectX402Requirements(unsupported, asset), 'X402_REQUIREMENT_UNSUPPORTED');

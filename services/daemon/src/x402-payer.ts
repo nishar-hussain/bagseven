@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { createPublicClient, createWalletClient, fallback, http, type Address, type Hex, type PublicClient } from 'viem';
 import { privateKeyToAccount, type PrivateKeyAccount } from 'viem/accounts';
-import { polygonAmoy } from 'viem/chains';
+import { avalancheFuji, polygonAmoy } from 'viem/chains';
 import { encodePaymentSignatureHeader } from '@x402/core/http';
 import type { PaymentPayload, PaymentRequired } from '@x402/core/types';
 import type { X402Requirements } from './x402.js';
@@ -58,17 +58,18 @@ export class X402Payer {
   private readonly chainId: number;
 
   constructor(config: X402PayerConfig) {
-    if (config.chainId !== 80002) throw new Error('x402 payer is restricted to Polygon Amoy (chain 80002)');
+    const chain = config.chainId === 80002 ? polygonAmoy : config.chainId === 43113 ? avalancheFuji : undefined;
+    if (!chain) throw new Error(`unsupported chain id ${config.chainId}; expected Polygon Amoy (80002) or Avalanche Fuji (43113)`);
     this.account = privateKeyToAccount(config.key);
-    const fallbackUrl = config.rpcFallbackUrl ?? 'https://polygon-amoy.drpc.org';
+    const fallbackUrl = config.rpcFallbackUrl;
     this.publicClient = createPublicClient({
-      chain: polygonAmoy,
+      chain,
       transport: fallback([
         http(config.rpcUrl, { retryCount: 3, retryDelay: 500 }),
-        http(fallbackUrl, { retryCount: 3, retryDelay: 750 }),
+        ...(fallbackUrl && fallbackUrl !== config.rpcUrl ? [http(fallbackUrl, { retryCount: 3, retryDelay: 750 })] : []),
       ]),
     });
-    this.walletClient = createWalletClient({ account: this.account, chain: polygonAmoy, transport: http(config.rpcUrl) });
+    this.walletClient = createWalletClient({ account: this.account, chain, transport: http(config.rpcUrl) });
     this.usdc = config.usdc;
     this.chainId = config.chainId;
   }

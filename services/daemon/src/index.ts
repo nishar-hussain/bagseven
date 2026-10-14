@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { privateKeyToAccount, type PrivateKeyAccount } from 'viem/accounts';
-import { spendIntentDomain, spendIntentTypes, canonicalSpawn, MandateClient } from '@bagseven/onchain';
+import { spendIntentDomain, spendIntentTypes, canonicalSpawn, chainConfigForId, MandateClient } from '@bagseven/onchain';
 import { createDb } from '@bagseven/db';
 import { Redis } from 'ioredis';
 import { ApiError, createService, type ServiceDeps } from '@bagseven/server';
@@ -232,7 +232,8 @@ function buildRoutes(app: FastifyInstance, { config, redis }: ServiceDeps): void
       }
       if (parsed && typeof parsed === 'object' && (parsed as { x402Version?: unknown }).x402Version === 2) {
         const required = decodeX402PaymentRequired(challengeHeader, parsed);
-        const requirement = selectX402Requirements(required, (config.USDC_ADDRESS ?? '') as `0x${string}`);
+        const configuredChainId = Number(config.CHAIN_ID ?? 80002);
+        const requirement = selectX402Requirements(required, (config.USDC_ADDRESS ?? '') as `0x${string}`, chainConfigForId(configuredChainId).network);
         validateX402AgainstPolicy(requirement, {
           perPurchaseCap: parseUnits(resolved.mandate.per_purchase_cap, 6),
           remainingWindow: parseUnits(resolved.remaining.remaining_window, 6),
