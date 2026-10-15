@@ -7,7 +7,7 @@ policy service, BagMandate contract, and research demo.
 
 Start PostgreSQL and Redis, apply the database migrations, and start the
 gateway, policy service, daemon, and console using the repository's existing
-development commands. The mandate must be active and its Polygon Amoy vault
+development commands. The mandate must be active and its Avalanche Fuji vault
 must contain test USDC.
 
 The policy service and daemon must use the same chain, contract, and internal
@@ -77,9 +77,9 @@ failure is reported as a failure; the agent does not retry a failed payment.
 
 ## 6. Verify a payment
 
-Use a Polygon Amoy provider resource and confirm the result contains the
+Use an Avalanche Fuji provider resource and confirm the result contains the
 daemon's decision, reservation information, and transaction hash. Verify the
-same transaction on the Polygon Amoy explorer and inspect the reservation and
+same transaction on the Fuji explorer and inspect the reservation and
 transaction rows in PostgreSQL. A successful natural-language answer alone is
 not proof of settlement.
 
@@ -181,7 +181,7 @@ process; it does not launch Claude Desktop.
 ### Verify the tools
 
 In Claude Desktop, ask it to call `bagseven_status`, then ask it to search with
-`bagseven_search`. Use `bagseven_fetch` only with a permitted Polygon Amoy
+`bagseven_search`. Use `bagseven_fetch` only with a permitted Avalanche Fuji
 resource. Confirm the returned worker ID matches the selected worker and verify
 any payment transaction independently. The repository can validate MCP tool
 discovery without Claude Desktop using:

@@ -34,7 +34,7 @@ async function wikipediaArticle(title: string): Promise<{ extract: string; url: 
 export function buildResearchProvider(config: NodeJS.ProcessEnv = process.env): { app: FastifyInstance; address: string } {
   const account = loadAccount(config);
   const host = config.RESEARCH_PROVIDER_HOST ?? '127.0.0.1';
-  const chain = Number(config.CHAIN_ID ?? 80002);
+  const chain = Number(config.CHAIN_ID ?? 43113);
   const token = config.USDC_ADDRESS ?? 'demo-usdc';
   const issued = new Map<string, LiveResource>();
   const available = new Map<string, LiveResource>();

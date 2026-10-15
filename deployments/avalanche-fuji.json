@@ -1,8 +1,8 @@
 {
   "chain": "Avalanche Fuji",
   "chainId": 43113,
-  "contract": "0xd1113a0b4cd54971c29a523289899633becef45e",
-  "mandateId": "785d8b1a-8446-4b12-8b64-fb3c8f872c5d",
+  "contract": "0x8bd0bcb20beea628d6802b917969ac184fe5f00e",
+  "mandateId": "f27bbd77-1c46-4b5d-bc6e-c4a41e2e8f4c",
   "owner": "0x684f947aA928D62641E8B46E126D537FFc719114",
   "operator": "0xAa832647f7c1CF56990295ad9D7aBF038dF0cb54",
   "enforcer": "0x684f947aA928D62641E8B46E126D537FFc719114",

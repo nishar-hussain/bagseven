@@ -19,7 +19,7 @@ const env = Object.fromEntries(
   }),
 );
 const GATEWAY = process.env.GATEWAY_URL ?? 'http://localhost:4000';
-const CHAIN_ID = Number(env.CHAIN_ID ?? 80002);
+const CHAIN_ID = Number(env.CHAIN_ID ?? 43113);
 
 const owner = privateKeyToAccount(env.OWNER_DEV_KEY as `0x${string}`);
 // Distinct operator keys for each agent (only sign EIP-712 off-chain; no gas).

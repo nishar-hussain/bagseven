@@ -8,10 +8,10 @@ const payment: PaymentRequired = {
   resource: { url: 'https://provider.example/resource' },
   accepts: [{
     scheme: 'exact',
-    network: 'eip155:80002',
+    network: 'eip155:43113',
     amount: '10000',
     payTo: '0x1111111111111111111111111111111111111111',
-    asset: '0x41E94Eb019C0762f9Bfcf9Fb1E58725BfB0e7582',
+    asset: '0x5425890298aed601595a70AB815c96711a31Bc65',
     maxTimeoutSeconds: 300,
     extra: { name: 'USDC', version: '2' },
   }],
@@ -20,10 +20,10 @@ const payment: PaymentRequired = {
 const requirement = {
   x402Version: 2 as const,
   scheme: 'exact',
-  network: 'eip155:80002',
+  network: 'eip155:43113',
   amount: '10000',
   payTo: '0x1111111111111111111111111111111111111111' as `0x${string}`,
-  asset: '0x41E94Eb019C0762f9Bfcf9Fb1E58725BfB0e7582' as `0x${string}`,
+  asset: '0x5425890298aed601595a70AB815c96711a31Bc65' as `0x${string}`,
   maxTimeoutSeconds: 300,
   extra: { name: 'USDC', version: '2' },
 };
@@ -33,7 +33,7 @@ describe('isolated x402 payer', () => {
     const payer = new X402Payer({
       key: '0x0123456789012345678901234567890123456789012345678901234567890123',
       rpcUrl: 'http://127.0.0.1:8545',
-      chainId: 80002,
+      chainId: 43113,
       usdc: requirement.asset,
     });
     const paymentResult = await payer.createPayment(payment, requirement);

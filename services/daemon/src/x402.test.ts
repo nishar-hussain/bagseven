@@ -4,12 +4,12 @@ import type { PaymentRequired } from '@x402/core/types';
 import { ApiError } from '@bagseven/server';
 import { assertVaultSupportsEip3009, classifyX402Settlement, decodeX402PaymentRequired, selectX402Requirements, validateX402AgainstPolicy, x402ChallengeKey } from './x402.js';
 
-const asset = '0x41E94Eb019C0762f9Bfcf9Fb1E58725BfB0e7582' as `0x${string}`;
+const asset = '0x5425890298aed601595a70AB815c96711a31Bc65' as `0x${string}`;
 const payTo = '0xE3837fE309618AE075DbeF0A20735c0615a308E6' as `0x${string}`;
 const payment: PaymentRequired = {
   x402Version: 2,
   resource: { url: 'https://provider.example/resource' },
-  accepts: [{ scheme: 'exact', network: 'eip155:80002', amount: '10000', payTo, asset, maxTimeoutSeconds: 300, extra: { name: 'USDC', version: '2' } }],
+  accepts: [{ scheme: 'exact', network: 'eip155:43113', amount: '10000', payTo, asset, maxTimeoutSeconds: 300, extra: { name: 'USDC', version: '2' } }],
 };
 
 function expectCode(fn: () => unknown, code: string): void {
@@ -17,15 +17,14 @@ function expectCode(fn: () => unknown, code: string): void {
   catch (error) { expect(error).toBeInstanceOf(ApiError); expect((error as ApiError).code).toBe(code); }
 }
 
-describe('x402 v2 Polygon Amoy adapter', () => {
+describe('x402 v2 Avalanche Fuji adapter', () => {
   it('decodes the official PAYMENT-REQUIRED header and selects exact USDC', () => {
     const decoded = decodeX402PaymentRequired(encodePaymentRequiredHeader(payment));
-    expect(selectX402Requirements(decoded, asset)).toMatchObject({ network: 'eip155:80002', amount: '10000', payTo, asset });
+    expect(selectX402Requirements(decoded, asset)).toMatchObject({ network: 'eip155:43113', amount: '10000', payTo, asset });
   });
 
   it('selects exact USDC on Avalanche Fuji when configured', () => {
-    const fujiPayment = { ...payment, accepts: [{ ...payment.accepts[0], network: 'eip155:43113', asset: '0x5425890298aed601595a70AB815c96711a31Bc65' }] } as PaymentRequired;
-    expect(selectX402Requirements(fujiPayment, '0x5425890298aed601595a70AB815c96711a31Bc65', 'eip155:43113')).toMatchObject({ network: 'eip155:43113', amount: '10000' });
+    expect(selectX402Requirements(payment, asset)).toMatchObject({ network: 'eip155:43113', amount: '10000' });
   });
 
   it('rejects unsupported networks', () => {
@@ -63,7 +62,7 @@ describe('x402 v2 Polygon Amoy adapter', () => {
 
   it('classifies failed and pending settlement without claiming success', () => {
     expect(classifyX402Settlement({ ok: false, body: { error: 'reverted' } })).toEqual({ state: 'failed', reason: 'x402 settlement failed' });
-    expect(classifyX402Settlement({ ok: false, transaction: '0xabc', network: 'eip155:80002' })).toMatchObject({ state: 'pending', transaction: '0xabc' });
-    expect(classifyX402Settlement({ ok: true, transaction: '0xdef', network: 'eip155:80002' })).toEqual({ state: 'settled', transaction: '0xdef', network: 'eip155:80002' });
+    expect(classifyX402Settlement({ ok: false, transaction: '0xabc', network: 'eip155:43113' })).toMatchObject({ state: 'pending', transaction: '0xabc' });
+    expect(classifyX402Settlement({ ok: true, transaction: '0xdef', network: 'eip155:43113' })).toEqual({ state: 'settled', transaction: '0xdef', network: 'eip155:43113' });
   });
 });

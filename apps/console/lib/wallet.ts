@@ -13,7 +13,7 @@ import {
 import { BagMandateAbi, canonicalMandate, canonicalSpawn, canonicalWithdraw, chainConfigForId, spendIntentDomain, spendIntentTypes, type SpendIntent } from '@bagseven/onchain';
 import { wagmiConfig } from './wagmi';
 
-export const CHAIN_ID = Number(process.env.NEXT_PUBLIC_CHAIN_ID ?? 80002);
+export const CHAIN_ID = Number(process.env.NEXT_PUBLIC_CHAIN_ID ?? 43113);
 export const CHAIN_CONFIG = chainConfigForId(CHAIN_ID);
 export const CHAIN_NAME = CHAIN_CONFIG.name;
 export const USDC_ADDRESS = (process.env.NEXT_PUBLIC_USDC_ADDRESS ?? CHAIN_CONFIG.usdc) as `0x${string}`;
@@ -59,7 +59,7 @@ export async function ensureSupportedNetwork(): Promise<void> {
   const account = getAccount(wagmiConfig);
   if (!account.address) throw new Error('connect the wallet before continuing');
   if (account.chainId !== CHAIN_ID) {
-    try { await switchChain(wagmiConfig, { chainId: CHAIN_ID as 80002 | 43113 }); }
+    try { await switchChain(wagmiConfig, { chainId: CHAIN_ID as 43113 }); }
     catch { throw new Error(`switch the connected wallet to ${CHAIN_NAME} before continuing`); }
   }
   if (getAccount(wagmiConfig).chainId !== CHAIN_ID) {
@@ -74,7 +74,7 @@ async function prepareFunding(contract: string, units: bigint): Promise<void> {
   // return the configured/default chain while the browser wallet is actually
   // connected to another network (for example Sepolia).
   if (account.chainId !== CHAIN_ID) {
-    try { await switchChain(wagmiConfig, { chainId: CHAIN_ID as 80002 | 43113 }); }
+    try { await switchChain(wagmiConfig, { chainId: CHAIN_ID as 43113 }); }
     catch { throw new Error(`switch the connected wallet to ${CHAIN_NAME} before funding the vault`); }
   }
   const connectedChainId = getAccount(wagmiConfig).chainId;

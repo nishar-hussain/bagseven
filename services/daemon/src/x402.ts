@@ -2,7 +2,6 @@ import { decodePaymentRequiredHeader } from '@x402/core/http';
 import type { PaymentRequired } from '@x402/core/types';
 import { ApiError } from '@bagseven/server';
 
-export const POLYGON_AMOY_NETWORK = 'eip155:80002';
 export const AVALANCHE_FUJI_NETWORK = 'eip155:43113';
 
 export interface X402Requirements {
@@ -59,7 +58,7 @@ export function decodeX402PaymentRequired(header?: string | null, body?: unknown
 export function selectX402Requirements(
   payment: PaymentRequired,
   expectedAsset: `0x${string}`,
-  expectedNetwork = POLYGON_AMOY_NETWORK,
+  expectedNetwork = AVALANCHE_FUJI_NETWORK,
 ): X402Requirements {
   if (payment.x402Version !== 2) throw new ApiError(501, 'X402_VERSION_UNSUPPORTED', `x402 version ${payment.x402Version} is not supported`);
   const option = payment.accepts?.find((candidate) => candidate.scheme === 'exact' && candidate.network === expectedNetwork && candidate.asset.toLowerCase() === expectedAsset.toLowerCase());
@@ -85,7 +84,7 @@ export function validateX402AgainstPolicy(requirement: X402Requirements, limits:
 
 /**
  * Kept as an explicit guard for deployments that have not configured the
- * isolated testnet payer. A BagMandate vault is not itself an EIP-3009
+ * isolated Fuji testnet payer. A BagMandate vault is not itself an EIP-3009
  * payer; the daemon must never silently fall back to the operator or enforcer.
  */
 export function assertVaultSupportsEip3009(): never {

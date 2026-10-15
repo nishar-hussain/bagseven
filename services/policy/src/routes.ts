@@ -38,7 +38,7 @@ const createMandateSchema = z.object({
   per_purchase_cap: z.string().min(1),
   per_seller_pct: z.number().int().min(0).max(10000),
   max_depth: z.number().int().min(0),
-  chain_id: z.number().int().default(80002),
+  chain_id: z.number().int().default(43113),
   signature: z.string().min(1),
 });
 
@@ -46,7 +46,7 @@ const spawnSchema = z.object({
   parent_agent_id: z.string().uuid(),
   operator_address: z.string().regex(/^0x[0-9a-fA-F]{40}$/),
   share_percent: z.number().int().min(1).max(100),
-  chain_id: z.number().int().default(80002),
+  chain_id: z.number().int().default(43113),
   signature: z.string().min(1),
 });
 
@@ -56,7 +56,7 @@ const spendIntentSchema = z.object({
   recipient: z.string().regex(/^0x[0-9a-fA-F]{40}$/),
   nonce: z.number().int().nonnegative(),
   timestamp: z.number().int().positive(),
-  chain_id: z.number().int().default(80002),
+  chain_id: z.number().int().default(43113),
   signature: z.string().min(1),
   reason: z.string().max(500).optional(),
   request_id: z.string().uuid().optional(),
@@ -68,7 +68,7 @@ const settlementSchema = z.object({ tx_hash: z.string().min(1), recipient: z.str
 const withdrawSchema = z.object({
   amount: z.string().min(1),
   to_address: z.string().regex(/^0x[0-9a-fA-F]{40}$/),
-  chain_id: z.number().int().default(80002),
+  chain_id: z.number().int().default(43113),
   signature: z.string().min(1),
 });
 
@@ -97,7 +97,7 @@ function mandateClient(config: NodeJS.ProcessEnv): MandateClient {
   return new MandateClient(key as `0x${string}`, {
     rpcUrl: config.RPC_URL ?? 'http://localhost:8545',
     rpcFallbackUrl: config.RPC_FALLBACK_URL,
-    chainId: Number(config.CHAIN_ID ?? 80002),
+    chainId: Number(config.CHAIN_ID ?? 43113),
   });
 }
 
@@ -108,7 +108,7 @@ function ownerClient(config: NodeJS.ProcessEnv): MandateClient {
   return new MandateClient(key as `0x${string}`, {
     rpcUrl: config.RPC_URL ?? 'http://localhost:8545',
     rpcFallbackUrl: config.RPC_FALLBACK_URL,
-    chainId: Number(config.CHAIN_ID ?? 80002),
+    chainId: Number(config.CHAIN_ID ?? 43113),
   });
 }
 
@@ -133,7 +133,19 @@ export function buildPolicyRoutes(app: FastifyInstance, { db, redis, config }: S
   });
 
   const getMandate = async (id: string) => {
-    const mandate = await db.query.mandates.findFirst({ where: eq(mandates.id, id) });
+    let mandate;
+    try {
+      mandate = await db.query.mandates.findFirst({ where: eq(mandates.id, id) });
+    } catch {
+      // Keep database connectivity/schema failures distinct from a missing
+      // mandate. The dashboard can then show the real recovery action instead
+      // of exposing Drizzle's raw SQL as a generic 500.
+      throw new ApiError(
+        503,
+        'DATABASE_QUERY_FAILED',
+        'database is unavailable or its migrations are out of date; start PostgreSQL and run pnpm db:migrate',
+      );
+    }
     if (!mandate) throw new ApiError(404, 'NOT_FOUND', 'mandate not found');
     return mandate;
   };
@@ -272,6 +284,7 @@ export function buildPolicyRoutes(app: FastifyInstance, { db, redis, config }: S
     let vault = 0n;
     let windowSpent = 0n;
     let lifetimeSpent = 0n;
+    let chainState: { status: 'available' } | { status: 'unavailable'; message: string } = { status: 'available' };
     if (contract) {
       try {
         [vault, windowSpent, lifetimeSpent] = await Promise.all([
@@ -280,13 +293,19 @@ export function buildPolicyRoutes(app: FastifyInstance, { db, redis, config }: S
           client.lifetimeSpent(contract),
         ]);
       } catch (error) {
-        throw new ApiError(502, 'CHAIN_READ_FAILED', `unable to read mandate contract state: ${(error as Error).message}`);
+        // The overview is also the dashboard's recovery surface. An RPC outage,
+        // stale contract address, or provider rate limit must not turn the whole
+        // console into a 500. Keep the database-backed tree/terms visible, but
+        // fail closed for drawability until live chain state is available again.
+        chainState = { status: 'unavailable', message: 'live on-chain state is temporarily unavailable' };
       }
     }
 
     const windowLeft = sub(mandate.budgetPerWindow, fromUnits(windowSpent));
     const lifetimeLeft = sub(mandate.lifetimeCap, fromUnits(lifetimeSpent));
-    const canDraw = Math.max(0, Math.min(Number(fromUnits(vault)), Number(windowLeft), Number(lifetimeLeft))).toFixed(2);
+    const canDraw = chainState.status === 'available'
+      ? Math.max(0, Math.min(Number(fromUnits(vault)), Number(windowLeft), Number(lifetimeLeft))).toFixed(2)
+      : '0.00';
 
     const tree = await db.query.agents.findMany({ where: eq(agents.mandateId, id) });
     const recentRefusals = await db.query.refusals.findMany({
@@ -303,6 +322,7 @@ export function buildPolicyRoutes(app: FastifyInstance, { db, redis, config }: S
       lifetime_cap: mandate.lifetimeCap,
       vault_available: fromUnits(vault),
       can_be_drawn_now: canDraw,
+      onchain_state: chainState,
       agents: tree.map((a) => ({ id: a.id, operator_address: a.operatorAddress, share_percent: a.sharePercent, depth: a.depth, status: a.status, parent_agent_id: a.parentAgentId, name: a.name, mcp_endpoint: a.mcpEndpoint })),
       recent_refusals: recentRefusals,
       terms: {

@@ -1,8 +1,7 @@
 # Avalanche Fuji testnet
 
-Bagseven supports Avalanche Fuji C-Chain (`43113`) as an alternative to
-Polygon Amoy. The application remains configured for one active chain per
-process; switch all server and console chain variables together.
+Bagseven supports Avalanche Fuji C-Chain (`43113`) as its only platform
+network. All server and console processes must use the Fuji variables below.
 
 Official Fuji values:
 
@@ -16,11 +15,10 @@ These values are documented by the [Avalanche Builder Hub](https://build.avax.ne
 
 ## Configure Bagseven for Fuji
 
-Copy the following values into the local `.env` (keep the existing Polygon
-values if you want to switch back later):
+Copy the following values into the local `.env`:
 
 ```ini
-SUPPORTED_CHAINS=polygon_amoy,avalanche_fuji
+SUPPORTED_CHAINS=avalanche_fuji
 CHAIN_ID=43113
 RPC_URL=https://api.avax-test.network/ext/bc/C/rpc
 RPC_FALLBACK_URL=https://api.avax-test.network/ext/bc/C/rpc
@@ -31,9 +29,8 @@ NEXT_PUBLIC_USDC_ADDRESS=0x5425890298aed601595a70AB815c96711a31Bc65
 ```
 
 Restart the policy, daemon, gateway, console, and MCP processes after changing
-the chain. Existing Polygon mandates do not move to Fuji; create a new mandate
-on Fuji because the chain ID and contract address are part of the signed and
-deployed configuration.
+the chain. Mandates must be created on Fuji because the chain ID and contract
+address are part of the signed and deployed configuration.
 
 ## Deploy a Fuji BagMandate
 
@@ -52,7 +49,6 @@ the contract bytecode and Fuji signer configuration independently.
 
 ## x402 note
 
-The x402 parser and isolated payer accept both Polygon Amoy and Fuji network
-identifiers when the corresponding `CHAIN_ID` and `USDC_ADDRESS` are active.
-The provider must advertise an exact option for `eip155:43113` and the Fuji
-USDC address. No real provider payment is implied by chain support alone.
+The x402 parser and isolated payer accept the Fuji network identifier
+`eip155:43113` and the Fuji USDC address. No real provider payment is implied
+by chain support alone.

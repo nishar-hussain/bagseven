@@ -156,7 +156,7 @@ pnpm demo:research
 
 Open `http://localhost:4020`, enter a task in the chat, and select **Send task**. Configure `CLINE_API_KEY`, `CLINE_BASE_URL=https://api.cline.bot/api/v1`, and `CLINE_MODEL=minimax/minimax-m2.5`. The agent uses Cline's OpenAI-compatible chat-completions endpoint with tool calling. `OPENCODE_*` and `OPENAI_*` variables remain supported as fallbacks. The provider uses live Wikipedia search/article APIs; if the worker, LLM, live provider, or payment fails, the run is reported as failed rather than being presented as approved.
 
-Verify end-to-end against the configured Polygon Amoy RPC:
+Verify end-to-end against the configured Avalanche Fuji RPC:
 ```bash
 pnpm exec tsx scripts/e2e-phase2.ts
 ```
@@ -187,8 +187,8 @@ cat >> .env <<'EOF'
 SIGNER_MODE=real
 TREASURY_AGENT_SEED=local-test-seed
 TREASURY_MASTER_PRIVATE_KEY=0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80
-POLYGON_AMOY_RPC_URL=http://localhost:8545
-POLYGON_AMOY_USDC=<MOCK_USDC from step 2>
+RPC_URL=http://localhost:8545
+USDC_ADDRESS=<MOCK_USDC from step 2>
 GAS_GRANT_NATIVE=0.01
 EOF
 # restart the services, then:
@@ -210,18 +210,14 @@ E2E_CREDIT=10 E2E_SPEND=3 pnpm exec tsx scripts/e2e-real.ts   # full real-local 
 ```
 
 Funding in the console then runs real local transactions against the local master
-faucet. To use real Polygon Amoy, set `SIGNER_MODE=real` with your funded key +
-`POLYGON_AMOY_RPC_URL`, or `SIGNER_MODE=dev` for purely simulated settlement.
-
-### Test on real Polygon Amoy
-
-1. Create a wallet for the master account and fund it with testnet ETH + USDC:
-   - Polygon Amoy faucet: `https://faucet.polygon.technology/` (POL for gas) and Circle's testnet faucet for USDC.
-2. Set `CHAIN_ID=80002`, `RPC_URL=https://polygon-amoy.drpc.org`, `USDC_ADDRESS=0x41E94Eb019C0762f9Bfcf9Fb1E58725BfB0e7582`, and `TREASURY_MASTER_PRIVATE_KEY` to the funded deployer key.
-3. Restart and create a mandate from the console. The policy service deploys `BagMandate` directly on Polygon Amoy. Verify the deployment and payment hashes on the [Amoy PolygonScan explorer](https://amoy.polygonscan.com).
+faucet. For the supported public testnet, use Avalanche Fuji with a funded
+testnet key and the Fuji values in `docs/avalanche-fuji.md`.
 
 ### Test on Avalanche Fuji
 
-Avalanche Fuji is also supported as a configured testnet. See [`docs/avalanche-fuji.md`](docs/avalanche-fuji.md) for the Fuji RPC, USDC, environment switch, and deployment flow. To deploy a standalone Fuji test mandate, run `DEPLOY_CHAIN_ID=43113 pnpm deploy:bagmandate`.
+1. Create a wallet for the master account and fund it with testnet ETH + USDC:
+   - Avalanche Fuji faucet for AVAX gas and Circle's testnet faucet for USDC.
+2. Set the Fuji values from [`docs/avalanche-fuji.md`](docs/avalanche-fuji.md) and `TREASURY_MASTER_PRIVATE_KEY` to the funded deployer key.
+3. Restart and create a mandate from the console. The policy service deploys `BagMandate` directly on Fuji. To deploy a standalone test mandate, run `DEPLOY_CHAIN_ID=43113 pnpm deploy:bagmandate`.
 
 > Note: `real` mode uses derived software keys (`eoa` custody type). This is correct for testnet and local verification; production custody should swap in MPC/smart-account custody behind the same `Signer` interface — the reservation/policy code does not change.

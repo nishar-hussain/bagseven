@@ -329,7 +329,7 @@ export default function Home() {
   "agent_id": "agt_7c81e2",
   "amount": "3.00",
   "category": "data-purchase",
-  "chain": "polygon_amoy",
+  "chain": "avalanche_fuji",
   "counterparty": "prv_aave"
 }
 
